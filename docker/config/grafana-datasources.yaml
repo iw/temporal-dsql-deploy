@@ -1,0 +1,27 @@
+# Grafana datasource provisioning
+# Auto-configures Mimir as the default Prometheus datasource
+# CloudWatch datasource for AWS metrics (requires AWS credentials)
+
+apiVersion: 1
+
+datasources:
+  - name: Mimir
+    type: prometheus
+    access: proxy
+    url: http://mimir:9009/prometheus
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Mimir
+
+  # CloudWatch datasource for Aurora DSQL and other AWS metrics
+  # Uses AWS credentials from ~/.aws mounted into the container
+  - name: CloudWatch
+    type: cloudwatch
+    access: proxy
+    editable: true
+    jsonData:
+      authType: default  # Uses default credential chain (~/.aws/credentials)
+      defaultRegion: eu-west-1

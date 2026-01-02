@@ -1,0 +1,47 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Generated certificates and keys (NEVER commit these!)
+certs/
+/server/
+clients/
+.acm/
+*.key
+*.crt
+*.srl
+*.ext
+*.csr
+server.chain.crt
+
+# Environment and secrets
+.env
+secrets/
+terraform-outputs.json
+
+# Terraform state and plans
+terraform/*.tfstate*
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/tfplan
+*.tfplan
+
+# Virtual environments
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
