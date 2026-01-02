@@ -4,7 +4,7 @@ Reference assets for provisioning an Aurora DSQL persistence backend for Tempora
 
 > **🔐 Security Note**: This project is configured for **development and testing**.
 ## What's here
-- **Terraform module (`terraform/`):** Builds a private VPC, subnets, security groups, Aurora DSQL cluster, an interface VPC endpoint to reach the cluster, OpenSearch Serverless collection for visibility, and a Client VPN endpoint so workstations can reach DSQL.
+- **Terraform module (`terraform/`):** Builds a private VPC, subnets, security groups, Aurora DSQL cluster, an interface VPC endpoint to reach the cluster, OpenSearch Provisioned domain for visibility, and a Client VPN endpoint so workstations can reach DSQL.
 - **Certificate helper (`src/temporal_dsql_deploy/cli.py`):** Typer commands to mint Client VPN certificates, import them into ACM, and print the ARNs Terraform needs.
 - **Docker runtime layer:** A thin renderer (`docker/render-and-start.sh` + `docker/config/persistence-dsql.template.yaml`) that templatises Temporal persistence/visibility configuration based on environment variables. The root `docker-compose.yml` wires the image with a UI and optional admin tools.
 
@@ -36,17 +36,20 @@ terraform apply \
 
 Tune `private_subnet_cidrs`, `allowed_client_cidrs`, and `client_vpn_cidr` if your network ranges differ. Key outputs:
 - `dsql_vpc_endpoint_dns_entries[0].dns_name` → SQL host for Temporal.
-- `opensearch_collection_endpoint` → OpenSearch Serverless endpoint for visibility.
+- `opensearch_domain_endpoint` → OpenSearch Provisioned domain endpoint for visibility.
 - `client_vpn_endpoint_id` → export profile and connect before running Temporal.
 - `vpc_id` and security group IDs → feed into your secrets/credentials wiring and Docker runtime env vars.
 
 ## OpenSearch Visibility (Provisioned by Terraform)
 
-This project now provisions an **OpenSearch Serverless collection** as part of the Terraform deployment. The collection is configured with:
+This project now provisions an **OpenSearch Provisioned domain** as part of the Terraform deployment. The domain is configured with:
 
-- **Collection name**: `{project_name}-temporal-visibility`
-- **Type**: SEARCH (optimized for full-text search and analytics)
-- **Security**: IAM-based data access policies
+- **Domain name**: `{project_name}-visibility`
+- **Instance type**: `t3.small.search` (configurable)
+- **Multi-AZ**: Enabled for high availability
+- **Security**: VPC-based with security groups and IAM authentication
+- **Encryption**: At-rest and in-transit encryption enabled
+- **Logging**: CloudWatch integration for monitoring
 - **Network**: Public HTTPS access with IAM authentication
 - **Encryption**: AWS-managed keys
 
@@ -55,14 +58,14 @@ This project now provisions an **OpenSearch Serverless collection** as part of t
 1. **Direct Connection with IAM** (Recommended for production):
    ```bash
    # Use the OpenSearch endpoint directly from Terraform outputs
-   TEMPORAL_OPENSEARCH_ENDPOINT=$(terraform output -raw opensearch_collection_endpoint)
+   TEMPORAL_OPENSEARCH_ENDPOINT=$(terraform output -raw opensearch_domain_endpoint)
    # Ensure your AWS credentials have the required permissions
    ```
 
 2. **Local aws-sigv4-proxy** (Development):
    ```bash
    # Run proxy locally to handle SigV4 signing
-   OPENSEARCH_ENDPOINT=$(terraform output -raw opensearch_collection_endpoint)
+   OPENSEARCH_ENDPOINT=$(terraform output -raw opensearch_domain_endpoint)
    docker run -p 9200:9200 \
      -e AWS_REGION=eu-west-1 \
      awslabs/aws-sigv4-proxy:latest \

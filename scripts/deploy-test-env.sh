@@ -98,7 +98,7 @@ terraform output -json > "$PROJECT_ROOT/terraform-outputs.json"
 DSQL_ENDPOINT=$(terraform output -json dsql_vpc_endpoint_dns_entries | jq -r '.[0].dns_name')
 VPN_ENDPOINT_ID=$(terraform output -raw client_vpn_endpoint_id)
 VPC_ID=$(terraform output -raw vpc_id)
-OPENSEARCH_ENDPOINT=$(terraform output -raw opensearch_collection_endpoint)
+OPENSEARCH_ENDPOINT=$(terraform output -raw opensearch_domain_endpoint)
 
 echo "DSQL Endpoint: $DSQL_ENDPOINT"
 echo "VPN Endpoint ID: $VPN_ENDPOINT_ID"
@@ -147,7 +147,7 @@ TEMPORAL_SQL_SSL_MODE=require
 TEMPORAL_SQL_PASSWORD_FILE_HOST=./secrets/dsql-password
 TEMPORAL_OPENSEARCH_PASSWORD_FILE_HOST=./secrets/opensearch-password
 
-# OpenSearch Serverless visibility endpoint (from Terraform)
+# OpenSearch Provisioned visibility endpoint (from Terraform)
 TEMPORAL_OPENSEARCH_ENDPOINT=$OPENSEARCH_ENDPOINT
 TEMPORAL_OPENSEARCH_USER=
 

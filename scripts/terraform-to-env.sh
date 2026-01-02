@@ -21,7 +21,7 @@ cd "$TERRAFORM_DIR"
 DSQL_ENDPOINT=$(terraform output -json dsql_vpc_endpoint_dns_entries 2>/dev/null | jq -r '.[0].dns_name' || echo "")
 VPN_ENDPOINT_ID=$(terraform output -raw client_vpn_endpoint_id 2>/dev/null || echo "")
 VPC_ID=$(terraform output -raw vpc_id 2>/dev/null || echo "")
-OPENSEARCH_ENDPOINT=$(terraform output -raw opensearch_collection_endpoint 2>/dev/null || echo "")
+OPENSEARCH_ENDPOINT=$(terraform output -raw opensearch_domain_endpoint 2>/dev/null || echo "")
 
 # Validate required outputs
 if [ -z "$DSQL_ENDPOINT" ]; then
@@ -67,7 +67,7 @@ TEMPORAL_SQL_SSL_MODE=require
 TEMPORAL_SQL_PASSWORD_FILE_HOST=./secrets/dsql-password
 TEMPORAL_OPENSEARCH_PASSWORD_FILE_HOST=./secrets/opensearch-password
 
-# OpenSearch Serverless visibility endpoint (from Terraform)
+# OpenSearch Provisioned visibility endpoint (from Terraform)
 # Use directly with IAM authentication or through aws-sigv4-proxy
 TEMPORAL_OPENSEARCH_ENDPOINT=$OPENSEARCH_ENDPOINT
 TEMPORAL_OPENSEARCH_USER=

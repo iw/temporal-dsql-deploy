@@ -289,10 +289,11 @@ TEMPORAL_SQL_DATABASE=postgres
 
 ### Medium Priority Issues
 - **[OPENSEARCH-001](./ISSUE-OPENSEARCH-SERVERLESS.md)**: OpenSearch Serverless Compatibility
-  - **Status**: Open - Medium Priority
+  - **Status**: In Progress - Medium Priority
+  - **Branch**: `feature/opensearch-provisioned`
   - **Impact**: Visibility store may not function correctly with serverless OpenSearch
   - **Solution**: Replace with provisioned OpenSearch cluster (t3.small.search)
-  - **Timeline**: Tomorrow - Terraform configuration update
+  - **Timeline**: In Development - Terraform configuration update
   - **Next Action**: Update Terraform to use provisioned OpenSearch domain
 
 ### Resolved Issues

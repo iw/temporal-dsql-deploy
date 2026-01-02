@@ -88,20 +88,93 @@ variable "environment" {
   default     = "development"
 }
 
-variable "opensearch_collection_name" {
+# OpenSearch Provisioned Domain Configuration
+variable "opensearch_engine_version" {
   type        = string
-  description = "Name for the OpenSearch Serverless collection"
-  default     = "temporal-visibility"
+  description = "OpenSearch engine version"
+  default     = "OpenSearch_2.11"
 }
 
-variable "dsql_cluster_name" {
+variable "opensearch_instance_type" {
   type        = string
-  description = "Name for the DSQL cluster"
-  default     = "temporal-dsql-cluster"
+  description = "Instance type for OpenSearch data nodes"
+  default     = "t3.small.search"
 }
 
-variable "opensearch_deletion_protection" {
+variable "opensearch_instance_count" {
+  type        = number
+  description = "Number of OpenSearch data nodes"
+  default     = 2
+}
+
+variable "opensearch_dedicated_master_enabled" {
   type        = bool
-  description = "Enable deletion protection for OpenSearch Serverless collection"
+  description = "Enable dedicated master nodes for OpenSearch"
   default     = false
+}
+
+variable "opensearch_master_instance_type" {
+  type        = string
+  description = "Instance type for OpenSearch master nodes"
+  default     = "t3.small.search"
+}
+
+variable "opensearch_master_instance_count" {
+  type        = number
+  description = "Number of OpenSearch master nodes"
+  default     = 3
+}
+
+variable "opensearch_zone_awareness_enabled" {
+  type        = bool
+  description = "Enable zone awareness for OpenSearch"
+  default     = true
+}
+
+variable "opensearch_ebs_volume_type" {
+  type        = string
+  description = "EBS volume type for OpenSearch"
+  default     = "gp3"
+}
+
+variable "opensearch_ebs_volume_size" {
+  type        = number
+  description = "EBS volume size in GB for OpenSearch"
+  default     = 20
+}
+
+variable "opensearch_internal_user_database_enabled" {
+  type        = bool
+  description = "Enable internal user database for OpenSearch"
+  default     = false
+}
+
+variable "opensearch_master_user_arn" {
+  type        = string
+  description = "ARN of the master user for OpenSearch (defaults to current caller identity)"
+  default     = ""
+}
+
+variable "opensearch_slow_logs_enabled" {
+  type        = bool
+  description = "Enable slow logs for OpenSearch"
+  default     = true
+}
+
+variable "opensearch_index_slow_logs_enabled" {
+  type        = bool
+  description = "Enable index slow logs for OpenSearch"
+  default     = true
+}
+
+variable "opensearch_error_logs_enabled" {
+  type        = bool
+  description = "Enable error logs for OpenSearch"
+  default     = true
+}
+
+variable "opensearch_log_retention_days" {
+  type        = number
+  description = "CloudWatch log retention in days for OpenSearch logs"
+  default     = 7
 }
