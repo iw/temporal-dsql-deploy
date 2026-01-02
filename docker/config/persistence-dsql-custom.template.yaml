@@ -1,0 +1,36 @@
+persistence:
+  defaultStore: default
+  visibilityStore: esdefault
+  advancedVisibilityStore: esdefault
+  numHistoryShards: $TEMPORAL_HISTORY_SHARDS
+  datastores:
+    default:
+      sql:
+        pluginName: $TEMPORAL_SQL_PLUGIN_NAME
+        databaseName: $TEMPORAL_SQL_DATABASE
+        connectAddr: $TEMPORAL_SQL_HOST:$TEMPORAL_SQL_PORT
+        connectProtocol: tcp
+        user: $TEMPORAL_SQL_USER
+        passwordFile: $TEMPORAL_SQL_PASSWORD_FILE
+        maxConns: $TEMPORAL_SQL_MAX_CONNS
+        maxIdleConns: $TEMPORAL_SQL_MAX_IDLE_CONNS
+        # DSQL-specific configuration
+        dsql:
+          enabled: $TEMPORAL_DSQL_ENABLED
+          region: $TEMPORAL_DSQL_REGION
+          clusterArn: $TEMPORAL_DSQL_CLUSTER_ARN
+        tls:
+          enabled: $TEMPORAL_SQL_TLS_ENABLED
+          caFile: $TEMPORAL_SQL_CA_FILE
+          serverName: $TEMPORAL_SQL_SERVER_NAME
+          # DSQL-specific TLS settings
+          skipVerify: $TEMPORAL_SQL_TLS_SKIP_VERIFY
+          enableHostVerification: $TEMPORAL_SQL_TLS_ENABLE_HOST_VERIFICATION
+    esdefault:
+      elasticsearch:
+        version: v8
+        url: $TEMPORAL_OPENSEARCH_ENDPOINT
+        username: $TEMPORAL_OPENSEARCH_USER
+        passwordFile: $TEMPORAL_OPENSEARCH_PASSWORD_FILE
+        disableSniff: true
+        logLevel: error

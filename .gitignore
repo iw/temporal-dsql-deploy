@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Generated certificates and keys (NEVER commit these!)
+certs/
+server/
+clients/
+.acm/
+*.key
+*.crt
+*.srl
+*.ext
+*.csr
+server.chain.crt
+
+# Environment and secrets
+.env
+secrets/
+
+# Terraform state
+terraform/*.tfstate*
+terraform/.terraform/
+
+# Virtual environments
+.venv

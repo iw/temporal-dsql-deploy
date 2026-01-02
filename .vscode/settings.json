@@ -1,0 +1,17 @@
+{
+    "kiroAgent.configureMCP": "Disabled",
+    "terraform.experimentalFeatures.validateOnSave": true,
+    "terraform.experimentalFeatures.prefillRequiredFields": true,
+    "terraform.codelens.referenceCount": true,
+    "files.associations": {
+        "*.tfvars": "terraform",
+        "*.tf": "terraform"
+    },
+    "[terraform]": {
+        "editor.defaultFormatter": "HashiCorp.terraform",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.formatDocument": "explicit"
+        }
+    }
+}
