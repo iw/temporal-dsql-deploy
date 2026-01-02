@@ -11,9 +11,8 @@ data "aws_availability_zones" "available" {
 data "aws_caller_identity" "current" {}
 
 locals {
-  name                       = var.project_name
-  tags                       = merge(var.tags, { Project = var.project_name })
-  opensearch_collection_name = "${var.project_name}-vis"
+  name = var.project_name
+  tags = merge(var.tags, { Project = var.project_name })
 }
 
 # -----------------------------
@@ -88,6 +87,37 @@ resource "aws_security_group" "dsql_vpce" {
   tags = merge(local.tags, { Name = "${local.name}-dsql-vpce-sg" })
 }
 
+resource "aws_security_group" "opensearch" {
+  name        = "${local.name}-opensearch-sg"
+  description = "Security group for OpenSearch cluster"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "HTTPS from VPN clients"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.client_vpn_cidr]
+  }
+
+  ingress {
+    description = "HTTPS from private subnets"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = var.private_subnet_cidrs
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name}-opensearch-sg" })
+}
+
 # -----------------------------
 # Aurora DSQL cluster
 # -----------------------------
@@ -99,94 +129,145 @@ resource "aws_dsql_cluster" "this" {
 }
 
 # -----------------------------
-# OpenSearch Serverless Collection
+# OpenSearch Provisioned Domain
 # -----------------------------
 
-resource "aws_opensearchserverless_security_policy" "encryption" {
-  name = "${var.project_name}-encrypt"
-  type = "encryption"
-  policy = jsonencode({
-    Rules = [
+# Create subnet group for OpenSearch
+resource "aws_opensearch_domain" "temporal_visibility" {
+  domain_name    = "${var.project_name}-visibility"
+  engine_version = var.opensearch_engine_version
+
+  cluster_config {
+    instance_type            = var.opensearch_instance_type
+    instance_count           = var.opensearch_instance_count
+    dedicated_master_enabled = var.opensearch_dedicated_master_enabled
+    master_instance_type     = var.opensearch_master_instance_type
+    master_instance_count    = var.opensearch_master_instance_count
+    zone_awareness_enabled   = var.opensearch_zone_awareness_enabled
+
+    dynamic "zone_awareness_config" {
+      for_each = var.opensearch_zone_awareness_enabled ? [1] : []
+      content {
+        availability_zone_count = length(var.private_subnet_cidrs)
+      }
+    }
+  }
+
+  vpc_options {
+    subnet_ids         = [for s in aws_subnet.private : s.id]
+    security_group_ids = [aws_security_group.opensearch.id]
+  }
+
+  ebs_options {
+    ebs_enabled = true
+    volume_type = var.opensearch_ebs_volume_type
+    volume_size = var.opensearch_ebs_volume_size
+  }
+
+  encrypt_at_rest {
+    enabled = true
+  }
+
+  node_to_node_encryption {
+    enabled = true
+  }
+
+  domain_endpoint_options {
+    enforce_https       = true
+    tls_security_policy = "Policy-Min-TLS-1-2-2019-07"
+  }
+
+  advanced_security_options {
+    enabled                        = true
+    anonymous_auth_enabled         = false
+    internal_user_database_enabled = var.opensearch_internal_user_database_enabled
+
+    master_user_options {
+      master_user_arn = var.opensearch_master_user_arn != "" ? var.opensearch_master_user_arn : data.aws_caller_identity.current.arn
+    }
+  }
+
+  access_policies = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
-        Resource = [
-          "collection/${local.opensearch_collection_name}"
-        ]
-        ResourceType = "collection"
+        Effect = "Allow"
+        Principal = {
+          AWS = var.opensearch_master_user_arn != "" ? var.opensearch_master_user_arn : data.aws_caller_identity.current.arn
+        }
+        Action   = "es:*"
+        Resource = "arn:aws:es:${var.region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-visibility/*"
       }
     ]
-    AWSOwnedKey = true
   })
-}
 
-resource "aws_opensearchserverless_security_policy" "network" {
-  name = "${var.project_name}-network"
-  type = "network"
-  policy = jsonencode([
-    {
-      Rules = [
-        {
-          Resource = [
-            "collection/${local.opensearch_collection_name}"
-          ]
-          ResourceType = "collection"
-        }
-      ]
-      AllowFromPublic = true
-    }
-  ])
-}
+  log_publishing_options {
+    cloudwatch_log_group_arn = aws_cloudwatch_log_group.opensearch_slow_logs.arn
+    log_type                 = "SEARCH_SLOW_LOGS"
+    enabled                  = var.opensearch_slow_logs_enabled
+  }
 
-resource "aws_opensearchserverless_access_policy" "data" {
-  name = "${var.project_name}-data"
-  type = "data"
-  policy = jsonencode([
-    {
-      Rules = [
-        {
-          Resource = [
-            "collection/${local.opensearch_collection_name}"
-          ]
-          Permission = [
-            "aoss:CreateCollectionItems",
-            "aoss:DeleteCollectionItems",
-            "aoss:UpdateCollectionItems",
-            "aoss:DescribeCollectionItems"
-          ]
-          ResourceType = "collection"
-        },
-        {
-          Resource = [
-            "index/${local.opensearch_collection_name}/*"
-          ]
-          Permission = [
-            "aoss:CreateIndex",
-            "aoss:DeleteIndex",
-            "aoss:UpdateIndex",
-            "aoss:DescribeIndex",
-            "aoss:ReadDocument",
-            "aoss:WriteDocument"
-          ]
-          ResourceType = "index"
-        }
-      ]
-      Principal = [
-        data.aws_caller_identity.current.arn
-      ]
-    }
-  ])
-}
+  log_publishing_options {
+    cloudwatch_log_group_arn = aws_cloudwatch_log_group.opensearch_index_slow_logs.arn
+    log_type                 = "INDEX_SLOW_LOGS"
+    enabled                  = var.opensearch_index_slow_logs_enabled
+  }
 
-resource "aws_opensearchserverless_collection" "temporal_visibility" {
-  name = local.opensearch_collection_name
-  type = "SEARCH"
+  log_publishing_options {
+    cloudwatch_log_group_arn = aws_cloudwatch_log_group.opensearch_error_logs.arn
+    log_type                 = "ES_APPLICATION_LOGS"
+    enabled                  = var.opensearch_error_logs_enabled
+  }
+
+  tags = merge(local.tags, { Name = "${local.name}-opensearch" })
 
   depends_on = [
-    aws_opensearchserverless_security_policy.encryption,
-    aws_opensearchserverless_security_policy.network,
-    aws_opensearchserverless_access_policy.data
+    aws_cloudwatch_log_group.opensearch_slow_logs,
+    aws_cloudwatch_log_group.opensearch_index_slow_logs,
+    aws_cloudwatch_log_group.opensearch_error_logs,
   ]
+}
 
-  tags = merge(local.tags, { Name = "${local.name}-temporal-visibility" })
+# CloudWatch Log Groups for OpenSearch
+resource "aws_cloudwatch_log_group" "opensearch_slow_logs" {
+  name              = "/aws/opensearch/domains/${var.project_name}-visibility/search-slow-logs"
+  retention_in_days = var.opensearch_log_retention_days
+  tags              = local.tags
+}
+
+resource "aws_cloudwatch_log_group" "opensearch_index_slow_logs" {
+  name              = "/aws/opensearch/domains/${var.project_name}-visibility/index-slow-logs"
+  retention_in_days = var.opensearch_log_retention_days
+  tags              = local.tags
+}
+
+resource "aws_cloudwatch_log_group" "opensearch_error_logs" {
+  name              = "/aws/opensearch/domains/${var.project_name}-visibility/error-logs"
+  retention_in_days = var.opensearch_log_retention_days
+  tags              = local.tags
+}
+
+# CloudWatch Log Resource Policy for OpenSearch
+resource "aws_cloudwatch_log_resource_policy" "opensearch" {
+  policy_name = "${var.project_name}-opensearch-logs"
+
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "es.amazonaws.com"
+        }
+        Action = [
+          "logs:PutLogEvents",
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream"
+        ]
+        Resource = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:*"
+      }
+    ]
+  })
 }
 
 # -----------------------------

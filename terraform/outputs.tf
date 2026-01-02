@@ -38,17 +38,27 @@ output "client_vpn_security_group_id" {
   value       = aws_security_group.client_vpn.id
 }
 
-output "opensearch_collection_endpoint" {
-  description = "OpenSearch Serverless collection endpoint"
-  value       = aws_opensearchserverless_collection.temporal_visibility.collection_endpoint
+output "opensearch_domain_endpoint" {
+  description = "OpenSearch domain endpoint"
+  value       = "https://${aws_opensearch_domain.temporal_visibility.endpoint}"
 }
 
-output "opensearch_collection_id" {
-  description = "OpenSearch Serverless collection ID"
-  value       = aws_opensearchserverless_collection.temporal_visibility.id
+output "opensearch_domain_arn" {
+  description = "OpenSearch domain ARN"
+  value       = aws_opensearch_domain.temporal_visibility.arn
 }
 
-output "opensearch_collection_arn" {
-  description = "OpenSearch Serverless collection ARN"
-  value       = aws_opensearchserverless_collection.temporal_visibility.arn
+output "opensearch_domain_id" {
+  description = "OpenSearch domain ID"
+  value       = aws_opensearch_domain.temporal_visibility.domain_id
+}
+
+output "opensearch_kibana_endpoint" {
+  description = "OpenSearch Dashboards (Kibana) endpoint"
+  value       = "https://${aws_opensearch_domain.temporal_visibility.kibana_endpoint}"
+}
+
+output "opensearch_security_group_id" {
+  description = "Security group ID for OpenSearch domain"
+  value       = aws_security_group.opensearch.id
 }
