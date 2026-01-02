@@ -96,7 +96,7 @@ Render the base Temporal image with your SQL + OpenSearch defaults. Example usin
 
 ```bash
 SQL_HOST=$(terraform -chdir=terraform output -json dsql_vpc_endpoint_dns_entries | jq -r '.[0].dns_name')
-OPENSEARCH_ENDPOINT=$(terraform -chdir=terraform output -raw opensearch_collection_endpoint)
+OPENSEARCH_ENDPOINT=$(terraform -chdir=terraform output -raw opensearch_domain_endpoint)
 
 DOCKER_BUILDKIT=1 docker build \
   --build-arg TEMPORAL_BASE_IMAGE=temporal-dsql:latest \
@@ -216,8 +216,8 @@ For detailed workflows and usage examples, see [scripts/WORKFLOW.md](scripts/WOR
 ## Connectivity expectations
 - Connect to the AWS Client VPN exported by Terraform before starting Temporal so the container can reach the interface VPC endpoint for DSQL.
 - Use the DNS entry from `dsql_vpc_endpoint_dns_entries` (or any RDS proxy you front it with) as `TEMPORAL_SQL_HOST`, with TLS enabled unless you have an explicit reason to disable it.
-- OpenSearch Serverless is provisioned by Terraform and accessible via the `opensearch_collection_endpoint` output. Use IAM authentication or run `aws-sigv4-proxy` locally for easier development.
-- Ensure your AWS credentials have the necessary IAM permissions for the OpenSearch Serverless collection created by Terraform.
+- OpenSearch Provisioned is deployed by Terraform and accessible via the `opensearch_domain_endpoint` output. Use IAM authentication or run `aws-sigv4-proxy` locally for easier development.
+- Ensure your AWS credentials have the necessary IAM permissions for the OpenSearch domain created by Terraform.
 
 ## 🔍 DSQL Connectivity Discovery & Current Development Approach
 
@@ -311,15 +311,16 @@ Aurora DSQL uses a serverless, pay-per-use model with two main cost components:
 
 **Minimal workload estimate:** A small Temporal deployment with basic workflow activity might consume 50,000-200,000 DPUs per month, costing $0.40-$1.60/month plus storage.
 
-### OpenSearch Serverless Pricing
-OpenSearch Serverless uses a capacity-based pricing model:
+### OpenSearch Provisioned Pricing
+OpenSearch Provisioned uses instance-based pricing:
 
 | Component | Price (EU West Ireland) | Description |
 |-----------|---------------------|-------------|
-| **Search OCU (OpenSearch Compute Units)** | $0.24 per OCU-hour | Indexing and search compute capacity |
-| **Storage** | $0.024 per GB-month | Data storage in the collection |
+| **t3.small.search** | $0.036 per hour | Small search instances for development |
+| **t3.medium.search** | $0.073 per hour | Medium search instances |
+| **EBS Storage (gp3)** | $0.092 per GB-month | SSD storage for OpenSearch data |
 
-**Minimal workload estimate:** A basic Temporal visibility setup typically requires 1-2 OCUs, costing $175-$350/month plus storage.
+**Minimal workload estimate:** A basic Temporal visibility setup with 2x t3.small.search instances costs ~$52/month plus storage.
 
 ### Required AWS Infrastructure Costs
 
@@ -344,26 +345,26 @@ OpenSearch Serverless uses a capacity-based pricing model:
 
 #### Minimal Development Setup (1 user, light usage)
 - Aurora DSQL: ~$1.00 (within free tier initially)
-- OpenSearch Serverless: ~$175.00 (1 OCU + minimal storage)
+- OpenSearch Provisioned: ~$52.00 (2x t3.small.search + minimal storage)
 - VPC Interface Endpoint: $7.20
 - Client VPN (1 user): $180.00
-- **Total: ~$363/month**
+- **Total: ~$240/month**
 
 #### Small Team Setup (5 users, moderate usage)
 - Aurora DSQL: ~$5.00 (200K DPUs + 2GB storage)
-- OpenSearch Serverless: ~$350.00 (2 OCUs + 5GB storage)
+- OpenSearch Provisioned: ~$78.00 (2x t3.medium.search + 5GB storage)
 - VPC Interface Endpoint: $7.20
 - Client VPN (5 users): $540.00
 - Data transfer: ~$10.00
-- **Total: ~$912/month**
+- **Total: ~$640/month**
 
 #### Production Setup (10 users, higher usage)
 - Aurora DSQL: ~$25.00 (1M DPUs + 10GB storage)
-- OpenSearch Serverless: ~$525.00 (3 OCUs + 20GB storage)
+- OpenSearch Provisioned: ~$157.00 (4x t3.medium.search + 20GB storage)
 - VPC Interface Endpoint: $7.20
 - Client VPN (10 users): $1,080.00
 - Data transfer: ~$25.00
-- **Total: ~$1,662/month**
+- **Total: ~$1,294/month**
 
 ### Ephemeral Development Usage (1-hour tests)
 
@@ -372,21 +373,21 @@ For short development tests, most infrastructure can be created and destroyed on
 | Component | Hourly Rate | 1-Hour Cost | Can be ephemeral? |
 |-----------|-------------|-------------|-------------------|
 | **Aurora DSQL** | Pay-per-DPU | ~$0.01-0.05 | ✅ **Yes** - Serverless, no minimum |
-| **OpenSearch Serverless** | $0.24/OCU-hour | ~$0.24-0.48 | ⚠️ **Limited** - Minimum 1 OCU, slow to scale down |
+| **OpenSearch Provisioned** | $0.036-0.073/hour | ~$0.07-0.15 | ✅ **Yes** - Can be stopped/started on-demand |
 | **VPC Infrastructure** | Free | $0.00 | ✅ **Yes** - Quick to create/destroy |
 | **VPC Interface Endpoint** | $0.01/hour | $0.01 | ✅ **Yes** - Can be created on-demand |
 | **Client VPN Endpoint** | $0.15/hour | $0.15 | ✅ **Yes** - Can be created on-demand |
 | **Client VPN Connection** | $0.10/hour | $0.10 | ✅ **Yes** - Only while connected |
 | **ACM Certificates** | Free | $0.00 | ⚠️ **Reusable** - Keep between tests |
 
-**Total cost per 1-hour test: ~$0.51-0.79** (OpenSearch is the primary cost driver for short tests)
+**Total cost per 1-hour test: ~$0.34-0.46** (Much more cost-effective for short development cycles)
 
 ### Ephemeral Deployment Strategy
 
 #### What to keep persistent (reuse across tests):
 - **ACM Certificates**: Free to store, time-consuming to recreate (~5 minutes)
 - **Certificate files**: Store locally, reference in Terraform variables
-- **OpenSearch Serverless Collection**: Consider keeping for multiple tests due to minimum OCU costs
+- **OpenSearch Domain**: Can be stopped/started, more cost-effective for ephemeral testing
 
 #### What to create/destroy per test:
 - **Terraform infrastructure**: VPC, subnets, DSQL cluster, VPC endpoint, Client VPN
@@ -474,17 +475,17 @@ terraform destroy -auto-approve
 
 1. **Use the free tier:** Start with Aurora DSQL's generous free tier (100K DPUs/month)
 2. **Minimize VPN users:** Client VPN is a significant cost component at $72/user/month
-3. **OpenSearch optimization:** Consider keeping OpenSearch collections persistent for multiple test cycles due to minimum OCU costs
+3. **OpenSearch optimization:** Use t3.small.search instances for development, scale up for production
 4. **Consider alternatives:** For production, evaluate AWS Site-to-Site VPN or AWS Direct Connect
 5. **Monitor DPU usage:** Use CloudWatch metrics to track and optimize database operations
 6. **Optimize data transfer:** Use VPC endpoints for AWS services to avoid internet egress charges
 7. **Regional pricing:** Consider other regions if your workload allows (prices may vary)
-8. **OpenSearch scaling:** Monitor OCU usage and adjust capacity based on actual search/indexing needs
+8. **OpenSearch scaling:** Right-size instances based on actual search/indexing needs, use smaller instances for development
 
 ### Important Notes
 - Prices are estimates and may vary by region and usage patterns
 - Aurora DSQL pricing is based on actual resource consumption, making it difficult to predict exactly
-- OpenSearch Serverless has minimum capacity requirements (1 OCU) which affects short-term usage costs
+- OpenSearch Provisioned offers more predictable costs and better performance for Temporal workloads
 - Client VPN is a primary cost driver for small deployments
 - Always monitor your AWS billing dashboard for actual costs
 - Consider AWS Database Savings Plans for predictable workloads (1-year commitment)
