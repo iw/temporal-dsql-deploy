@@ -112,8 +112,8 @@ The current schema setup scripts create **only the Temporal persistence schema**
 
 ### Visibility Schema (OpenSearch)
 
-**Visibility is handled by OpenSearch Serverless**, not DSQL:
-- Terraform provisions OpenSearch Serverless collection automatically
+**Visibility is handled by OpenSearch Provisioned**, not DSQL:
+- Terraform provisions OpenSearch domain automatically
 - No separate visibility schema setup needed in DSQL
 - Temporal writes visibility data to OpenSearch, not the persistence database
 
@@ -123,8 +123,8 @@ The current schema setup scripts create **only the Temporal persistence schema**
 TEMPORAL_SQL_HOST=your-cluster-id.dsql.region.on.aws
 TEMPORAL_SQL_DATABASE=postgres
 
-# Visibility (OpenSearch Serverless)
-TEMPORAL_OPENSEARCH_ENDPOINT=https://xxx.eu-west-1.aoss.amazonaws.com
+# Visibility (OpenSearch Provisioned)
+TEMPORAL_OPENSEARCH_ENDPOINT=https://xxx.region.es.amazonaws.com
 ```
 
 ## 🏗️ Architecture Support
@@ -187,7 +187,7 @@ TEMPORAL_SQL_TLS_ENABLED=true
 
 ### OpenSearch Configuration
 ```bash
-TEMPORAL_OPENSEARCH_ENDPOINT=https://xxx.eu-west-1.aoss.amazonaws.com
+TEMPORAL_OPENSEARCH_ENDPOINT=https://xxx.region.es.amazonaws.com
 # No password needed - uses IAM authentication
 ```
 

@@ -289,12 +289,12 @@ TEMPORAL_SQL_DATABASE=postgres
 
 ### Medium Priority Issues
 - **[OPENSEARCH-001](./ISSUE-OPENSEARCH-SERVERLESS.md)**: OpenSearch Serverless Compatibility
-  - **Status**: In Progress - Medium Priority
+  - **Status**: Completed - Medium Priority
   - **Branch**: `feature/opensearch-provisioned`
-  - **Impact**: Visibility store may not function correctly with serverless OpenSearch
-  - **Solution**: Replace with provisioned OpenSearch cluster (t3.small.search)
-  - **Timeline**: In Development - Terraform configuration update
-  - **Next Action**: Update Terraform to use provisioned OpenSearch domain
+  - **Impact**: Visibility store compatibility improved with provisioned OpenSearch
+  - **Solution**: ✅ Replaced with provisioned OpenSearch cluster (t3.small.search)
+  - **Timeline**: Completed - Terraform configuration updated
+  - **Next Action**: Testing and validation of new configuration
 
 ### Resolved Issues
 - **[DSQL-BIN-001]**: Nexus Endpoints Binary Field Panic ✅ **RESOLVED**
