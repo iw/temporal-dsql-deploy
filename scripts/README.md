@@ -1,225 +1,325 @@
 # Scripts Directory
 
-This directory contains automation scripts for deploying and testing Temporal with Aurora DSQL.
+This directory contains automation scripts for the streamlined DSQL + Elasticsearch setup.
 
-## 🚀 Quick Start
+## Important: PROJECT_NAME Environment Variable
 
-For immediate development and testing with Aurora DSQL:
+**Critical for AWS resource management**: The `PROJECT_NAME` environment variable is used to:
+- Name AWS resources consistently
+- Enable proper resource cleanup
+- Avoid naming conflicts between deployments
+
+### Setting PROJECT_NAME
 
 ```bash
-# 1. Deploy infrastructure
-./scripts/deploy-test-env.sh
+# Option 1: Export for session (recommended)
+export PROJECT_NAME="my-temporal-test"
+./scripts/deploy.sh
 
-# 2. Setup schema (uses public endpoint + IAM auth)
-./scripts/setup-dsql-schema-simple.sh
+# Option 2: Inline for single command
+PROJECT_NAME="my-test" ./scripts/deploy.sh
 
-# 3. Test integration
-./scripts/test-temporal-dsql-integration.sh
-
-# 4. Cleanup when done
-./scripts/cleanup-aws-resources.sh
+# Option 3: Let script auto-generate (includes timestamp)
+./scripts/deploy.sh  # Creates: temporal-dsql-1704123456
 ```
 
-## 📋 Script Categories
+### Why PROJECT_NAME Matters
 
-### ✅ Current & Recommended (Public Endpoint)
-- **`setup-dsql-schema-simple.sh`** - Schema setup using DSQL public endpoint with IAM auth
-- **`test-temporal-dsql-integration.sh`** - Full Temporal integration test with DSQL public endpoint
-- **`build-temporal-dsql.sh`** - Build custom Temporal Docker images (multi-architecture)
-- **`deploy-test-env.sh`** - Complete infrastructure deployment
-- **`cleanup-aws-resources.sh`** - Clean up AWS resources and local state
+1. **Resource Naming**: AWS resources are tagged with this name
+2. **Cleanup**: `cleanup.sh` uses this to identify resources to destroy
+3. **Isolation**: Prevents conflicts with other deployments
+4. **Tracking**: Makes it easy to identify your resources in AWS Console
 
-### 🔧 Infrastructure & Deployment
-- **`terraform-to-env.sh`** - Extract Terraform outputs to environment variables
-- **`connect-vpn.sh`** - Download and configure AWS Client VPN profile
-- **`setup-aws-vpn-client.sh`** - Install AWS Client VPN Desktop Application
-- **`check-vpn-status.sh`** - Check VPN connection status
+**⚠️ Important**: If you don't set PROJECT_NAME, the script generates a timestamp-based name. Make note of it for cleanup!
 
-### 🧪 Testing & Validation
-- **`test-dsql-connectivity.sh`** - Test DSQL connectivity using Go sample application
-- **`test-temporal-dsql-minimal.sh`** - Minimal Docker image validation (no external dependencies)
-- **`test-temporal-dsql-public.sh`** - Test Temporal with DSQL public endpoint
-- **`test-aws-vpn-connectivity.sh`** - Test VPN connectivity and DNS resolution
-- **`test-ssl-connectivity.sh`** - Test SSL/TLS connectivity to DSQL endpoints
+## Core Scripts
 
-### ⚠️ Legacy Scripts (VPC Endpoint Issues)
-- **`setup-dsql-schema.sh`** - VPC endpoint schema setup (connectivity issues)
-- **`test-temporal-integration.sh`** - VPC endpoint integration test (connectivity issues)
-- **`complete-integration.sh`** - VPC endpoint workflow (connectivity issues)
-- **`run-schema-setup.sh`** - Wrapper for legacy schema operations
-
-### 📚 Documentation
-- **`WORKFLOW.md`** - Detailed workflow documentation and step-by-step guides
-
-## 🔍 DSQL Connectivity Discovery
-
-### Current Working Approach: Public Endpoint ✅
-
-During development, we discovered that **DSQL VPC endpoints have connectivity issues** on port 5432. The current working solution uses the **public endpoint** with IAM authentication:
+### `build-temporal-dsql.sh`
+**Docker image building**
+- Builds Temporal DSQL runtime image from temporal-dsql repository
+- Auto-detects system architecture (amd64, arm64, arm)
+- Supports custom architecture specification
+- Creates both base image and deployment runtime
+- Follows Temporal's official Docker build patterns
 
 ```bash
-# Working Configuration (Public Endpoint)
-TEMPORAL_SQL_HOST=your-cluster-id.dsql.region.on.aws  # ✅ Works
-TEMPORAL_SQL_USER=admin
-TEMPORAL_SQL_DATABASE=postgres
-# Uses IAM authentication - no password files needed
-```
-
-**Benefits of Public Endpoint Approach:**
-- ✅ **Immediate connectivity** - No VPC endpoint issues
-- ✅ **IAM authentication** - Secure, no static passwords
-- ✅ **TLS encryption** - All traffic encrypted in transit
-- ✅ **Simplified setup** - No VPN dependency for database access
-
-### VPC Endpoint Issues (Legacy)
-
-```bash
-# VPC Endpoint (Not Working)
-TEMPORAL_SQL_HOST=dsql-xxx.eu-west-1.on.aws  # ❌ Connection refused on port 5432
-# Requires VPN connection but endpoint doesn't accept connections
-```
-
-**Symptoms:**
-- VPN connects successfully (gets IP in 10.254.0.0/22 range)
-- DNS resolution works for VPC endpoint
-- Port 5432 connections are refused despite proper security groups
-- Appears to be a service-level issue with DSQL VPC endpoints
-
-### Infrastructure Value
-
-The VPC + VPN infrastructure remains valuable:
-- **Future-proofing**: Ready when VPC endpoint connectivity is resolved
-- **Security reference**: Demonstrates complete private networking setup
-- **Other services**: Provides secure access to other AWS services in the VPC
-
-## 📊 Schema Management
-
-### Temporal Schema Only
-
-The current schema setup scripts create **only the Temporal persistence schema**:
-
-```bash
-# Creates Temporal persistence tables in 'postgres' database
-./scripts/setup-dsql-schema-simple.sh
-```
-
-**What gets created:**
-- Temporal workflow execution tables
-- Task queue tables  
-- History tables
-- Timer tables
-- All persistence-related schema objects
-
-### Visibility Schema (OpenSearch)
-
-**Visibility is handled by OpenSearch Serverless**, not DSQL:
-- Terraform provisions OpenSearch Serverless collection automatically
-- No separate visibility schema setup needed in DSQL
-- Temporal writes visibility data to OpenSearch, not the persistence database
-
-**Configuration:**
-```bash
-# Persistence (DSQL)
-TEMPORAL_SQL_HOST=your-cluster-id.dsql.region.on.aws
-TEMPORAL_SQL_DATABASE=postgres
-
-# Visibility (OpenSearch Serverless)
-TEMPORAL_OPENSEARCH_ENDPOINT=https://xxx.eu-west-1.aoss.amazonaws.com
-```
-
-## 🏗️ Architecture Support
-
-All build scripts support multiple architectures:
-
-```bash
-# Auto-detect architecture (recommended)
+# Auto-detect architecture
 ./scripts/build-temporal-dsql.sh ../temporal-dsql
 
-# Explicit architecture
-./scripts/build-temporal-dsql.sh ../temporal-dsql arm64  # Apple Silicon
-./scripts/build-temporal-dsql.sh ../temporal-dsql amd64  # Intel/AMD
+# Specify architecture
+./scripts/build-temporal-dsql.sh ../temporal-dsql arm64
+./scripts/build-temporal-dsql.sh ../temporal-dsql amd64
 
-# Environment variable
-TARGET_ARCH=arm64 ./scripts/deploy-test-env.sh
+# Custom path and architecture
+./scripts/build-temporal-dsql.sh /path/to/temporal-dsql arm64
 ```
 
-**Supported architectures:**
-- `arm64` (aarch64) - Apple Silicon, AWS Graviton
-- `amd64` (x86_64) - Intel/AMD 64-bit
+Using the architecture-specific invocation is the recommended method for building for the image. On Apple Silicon this would be:
 
-## 🔐 Security & Authentication
-
-### DSQL Authentication
-- **IAM-based**: Uses AWS IAM tokens (no static passwords)
-- **Automatic**: DSQL plugin handles token generation
-- **Secure**: All connections use TLS encryption
-
-### OpenSearch Authentication
-- **IAM-based**: Uses AWS IAM for data access
-- **Flexible**: Direct connection or via aws-sigv4-proxy
-- **Scoped**: Access policies created by Terraform
-
-### AWS Credentials
-Scripts use standard AWS credential chain:
 ```bash
-# Environment variables
-AWS_ACCESS_KEY_ID=xxx
-AWS_SECRET_ACCESS_KEY=xxx
-AWS_SESSION_TOKEN=xxx  # If using temporary credentials
-
-# Or AWS profiles
-AWS_PROFILE=your-profile
-
-# Or IAM roles (in EC2/ECS)
+./scripts/build-temporal-dsql.sh ../temporal-dsql arm64
 ```
 
-## 📝 Environment Variables
+**Output Images**:
+- `temporal-dsql:latest` - Base image from temporal-dsql repository
+- `temporal-dsql-runtime:test` - Deployment runtime with config templates
 
-### Core DSQL Configuration
+### `deploy.sh`
+**Infrastructure deployment and environment setup**
+- Deploys Aurora DSQL cluster via Terraform
+- Generates environment configuration (.env file)
+- Prepares the environment for Temporal services
+- Does NOT setup database schema (use setup-schema.sh for that)
+- Requires PROJECT_NAME environment variable or generates timestamp-based name
+
 ```bash
-TEMPORAL_SQL_HOST=your-cluster-id.dsql.region.on.aws
-TEMPORAL_SQL_PORT=5432
-TEMPORAL_SQL_USER=admin
-TEMPORAL_SQL_DATABASE=postgres
-TEMPORAL_SQL_PLUGIN=dsql
-TEMPORAL_SQL_TLS_ENABLED=true
+# With auto-generated project name
+./scripts/deploy.sh
+
+# With custom project name
+PROJECT_NAME="my-temporal-test" ./scripts/deploy.sh
 ```
 
-### OpenSearch Configuration
+### `test.sh`
+**Integration testing and validation**
+- Tests DSQL connectivity
+- Starts all services (Elasticsearch + Temporal)
+- Validates service health
+- Provides troubleshooting information
+
 ```bash
-TEMPORAL_OPENSEARCH_ENDPOINT=https://xxx.eu-west-1.aoss.amazonaws.com
-# No password needed - uses IAM authentication
+./scripts/test.sh
 ```
 
-### AWS Configuration
+### `cleanup.sh`
+**Resource cleanup**
+- Stops Docker containers and removes volumes
+- Optionally removes Docker images
+- Optionally destroys AWS infrastructure
+- Cleans up generated files
+
 ```bash
-AWS_REGION=eu-west-1
-AWS_ACCESS_KEY_ID=xxx
-AWS_SECRET_ACCESS_KEY=xxx
+./scripts/cleanup.sh
 ```
 
-## 🚨 Common Issues & Solutions
+## Setup Scripts
 
-### "Connection refused" on port 5432
-- **Cause**: Using VPC endpoint instead of public endpoint
-- **Solution**: Use public endpoint in `TEMPORAL_SQL_HOST`
+### `setup-schema.sh`
+**DSQL schema initialization**
+- Creates database if needed
+- Sets up base schema (v0)
+- Updates to latest schema version
+- Uses temporal-sql-tool with Helm chart approach
 
-### "Authentication failed"
-- **Cause**: Missing or invalid AWS credentials
-- **Solution**: Verify AWS credentials and IAM permissions
+```bash
+./scripts/setup-schema.sh
+```
 
-### "Image not found" errors
-- **Cause**: Docker images not built for correct architecture
-- **Solution**: Use `./scripts/build-temporal-dsql.sh` with correct arch
+### `setup-elasticsearch.sh`
+**Elasticsearch index setup**
+- Waits for Elasticsearch to be ready
+- Creates visibility index with proper mappings
+- Tests search functionality
+- Provides health check information
 
-### Schema version mismatch
-- **Cause**: Using wrong schema version
-- **Solution**: Use version 1.0 in schema setup scripts
+```bash
+./scripts/setup-elasticsearch.sh
+```
 
-## 💡 Development Tips
+## Utility Scripts
 
-1. **Use public endpoint**: Faster setup, no VPN dependency
-2. **Keep infrastructure**: VPC/VPN useful for future and other services
-3. **IAM authentication**: More secure than static passwords
-4. **Multi-arch builds**: Ensure correct architecture for your platform
-5. **OpenSearch separate**: Visibility uses OpenSearch, not DSQL
+### `test-dsql-connectivity.sh`
+**DSQL connection testing**
+- Tests basic DSQL connectivity
+- Validates IAM authentication
+- Checks cluster status
+
+```bash
+./scripts/test-dsql-connectivity.sh
+```
+
+## Usage Patterns
+
+### Complete Setup (Recommended)
+```bash
+# Set project name for easier cleanup
+export PROJECT_NAME="my-temporal-test"
+
+# Build Docker images first
+./scripts/build-temporal-dsql.sh ../temporal-dsql
+
+# Deploy infrastructure and setup environment
+./scripts/deploy.sh
+
+# Setup database schema
+./scripts/setup-schema.sh
+
+# Test the setup
+./scripts/test.sh
+
+# Use Temporal...
+
+# Cleanup when done (uses PROJECT_NAME)
+./scripts/cleanup.sh
+```
+
+### Manual Step-by-Step
+```bash
+# 0. Set project name
+export PROJECT_NAME="my-temporal-test"
+
+# 1. Build Docker images
+./scripts/build-temporal-dsql.sh ../temporal-dsql
+
+# 2. Deploy infrastructure only
+cd terraform
+terraform apply -var "project_name=$PROJECT_NAME"
+
+# 3. Setup environment manually
+cp .env.example .env
+# Edit .env with DSQL endpoint from terraform output
+
+# 4. Setup schema
+./scripts/setup-schema.sh
+
+# 5. Start services
+docker compose up -d
+
+# 6. Setup Elasticsearch
+./scripts/setup-elasticsearch.sh
+
+# 7. Test
+./scripts/test.sh
+```
+
+# 4. Start services
+docker compose up -d
+
+# 5. Setup Elasticsearch
+./scripts/setup-elasticsearch.sh
+
+# 6. Test
+./scripts/test.sh
+```
+
+### Development Workflow
+```bash
+# Set consistent project name for the session
+export PROJECT_NAME="dev-temporal"
+
+# Quick restart after code changes
+docker compose restart
+
+# View logs
+docker compose logs -f temporal-frontend
+
+# Reset schema (if needed)
+./scripts/setup-schema.sh
+
+# Full reset
+./scripts/cleanup.sh
+./scripts/deploy.sh
+./scripts/setup-schema.sh
+```
+
+## Script Dependencies
+
+### Required Tools
+- **Docker & Docker Compose**: Container orchestration
+- **AWS CLI**: AWS resource management
+- **Terraform**: Infrastructure provisioning
+- **curl**: HTTP testing
+- **nc (netcat)**: Port connectivity testing
+- **jq**: JSON processing (optional but recommended)
+
+### Required Files
+- **temporal-sql-tool**: Must be available at `../temporal-dsql/temporal-sql-tool`
+- **DSQL Schema**: Must be available at `../temporal-dsql/schema/dsql/v12/temporal/versioned`
+- **Docker Image**: `temporal-dsql-runtime:test` must be built using `./scripts/build-temporal-dsql.sh`
+- **Temporal DSQL Source**: temporal-dsql repository must be available (typically at `../temporal-dsql`)
+
+### Environment Variables
+Scripts read from `.env`:
+- `TEMPORAL_SQL_HOST`: DSQL endpoint
+- `TEMPORAL_SQL_DATABASE`: Database name
+- `TEMPORAL_SQL_USER`: Database user
+- `TEMPORAL_ELASTICSEARCH_INDEX`: Elasticsearch index name
+- `AWS_REGION`: AWS region
+
+## Error Handling
+
+All scripts include:
+- **Exit on error**: `set -euo pipefail`
+- **Validation checks**: Verify required files and tools
+- **Graceful degradation**: Continue with warnings when possible
+- **Clear error messages**: Explain what went wrong and how to fix
+
+## Customization
+
+### Environment Variables
+Override default values by setting environment variables:
+```bash
+# Custom project name (recommended)
+export PROJECT_NAME="my-temporal-test"
+export AWS_REGION="us-west-2"
+./scripts/deploy.sh
+
+# Or inline
+PROJECT_NAME="my-test" AWS_REGION="eu-west-1" ./scripts/deploy.sh
+```
+
+**Important Environment Variables:**
+- `PROJECT_NAME`: Prefix for AWS resources (required for cleanup)
+- `AWS_REGION`: AWS region for DSQL cluster (default: eu-west-1)
+
+### Script Modification
+Scripts are designed to be readable and modifiable:
+- Clear section headers
+- Descriptive variable names
+- Modular structure
+- Extensive comments
+
+## Troubleshooting
+
+### Common Issues
+
+1. **temporal-sql-tool not found**
+   - Ensure temporal-dsql repository is built
+   - Check path: `../temporal-dsql/temporal-sql-tool`
+
+2. **AWS permissions**
+   - Ensure AWS CLI is configured
+   - Check IAM permissions for DSQL and Terraform
+
+3. **PROJECT_NAME issues**
+   - Set PROJECT_NAME consistently across deploy/cleanup
+   - Note auto-generated names for later cleanup
+   - Use descriptive names to avoid confusion
+
+4. **Docker issues**
+   - Ensure Docker daemon is running
+   - Check available disk space
+   - Verify network connectivity
+
+5. **Port conflicts**
+   - Check if ports 7233, 8080, 9200 are available
+   - Stop conflicting services
+
+### Debug Mode
+Run scripts with debug output:
+```bash
+bash -x ./scripts/deploy.sh
+```
+
+### Log Analysis
+Check specific service logs:
+```bash
+# All services
+docker compose logs
+
+# Specific service
+docker compose logs temporal-frontend
+
+# Follow logs
+docker compose logs -f elasticsearch
+```

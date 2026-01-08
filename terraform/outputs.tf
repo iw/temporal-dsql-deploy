@@ -1,54 +1,37 @@
 output "dsql_cluster_arn" {
-  value = aws_dsql_cluster.this.arn
+  description = "ARN of the Aurora DSQL cluster"
+  value       = aws_dsql_cluster.this.arn
 }
 
-output "dsql_vpc_endpoint_service_name" {
-  value = aws_dsql_cluster.this.vpc_endpoint_service_name
+output "dsql_cluster_identifier" {
+  description = "Identifier of the Aurora DSQL cluster"
+  value       = aws_dsql_cluster.this.identifier
 }
 
-output "dsql_vpc_endpoint_id" {
-  value = aws_vpc_endpoint.dsql.id
+output "dsql_public_endpoint" {
+  description = "Public endpoint for Aurora DSQL cluster"
+  value       = "${aws_dsql_cluster.this.identifier}.dsql.${var.region}.on.aws"
 }
 
-output "dsql_vpc_endpoint_dns_entries" {
-  value = aws_vpc_endpoint.dsql.dns_entry
-}
+# Environment variables for easy configuration
+output "environment_variables" {
+  description = "Environment variables for Temporal configuration"
+  value = {
+    # DSQL Configuration
+    TEMPORAL_SQL_HOST        = "${aws_dsql_cluster.this.identifier}.dsql.${var.region}.on.aws"
+    TEMPORAL_SQL_PORT        = "5432"
+    TEMPORAL_SQL_USER        = "admin"
+    TEMPORAL_SQL_DATABASE    = "postgres"
+    TEMPORAL_SQL_PLUGIN      = "dsql"
+    TEMPORAL_SQL_TLS_ENABLED = "true"
+    TEMPORAL_SQL_IAM_AUTH    = "true"
 
-output "client_vpn_endpoint_id" {
-  value = aws_ec2_client_vpn_endpoint.this.id
-}
+    # AWS Configuration
+    AWS_REGION = var.region
 
-output "vpc_id" {
-  description = "VPC ID for reference"
-  value       = aws_vpc.this.id
-}
-
-output "private_subnet_ids" {
-  description = "Private subnet IDs for troubleshooting"
-  value       = [for s in aws_subnet.private : s.id]
-}
-
-output "dsql_vpce_security_group_id" {
-  description = "Security group ID for DSQL VPC endpoint"
-  value       = aws_security_group.dsql_vpce.id
-}
-
-output "client_vpn_security_group_id" {
-  description = "Security group ID for Client VPN"
-  value       = aws_security_group.client_vpn.id
-}
-
-output "opensearch_collection_endpoint" {
-  description = "OpenSearch Serverless collection endpoint"
-  value       = aws_opensearchserverless_collection.temporal_visibility.collection_endpoint
-}
-
-output "opensearch_collection_id" {
-  description = "OpenSearch Serverless collection ID"
-  value       = aws_opensearchserverless_collection.temporal_visibility.id
-}
-
-output "opensearch_collection_arn" {
-  description = "OpenSearch Serverless collection ARN"
-  value       = aws_opensearchserverless_collection.temporal_visibility.arn
+    # Elasticsearch Configuration (Local Docker)
+    TEMPORAL_ELASTICSEARCH_HOST   = "elasticsearch"
+    TEMPORAL_ELASTICSEARCH_PORT   = "9200"
+    TEMPORAL_ELASTICSEARCH_SCHEME = "http"
+  }
 }
