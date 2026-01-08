@@ -5,6 +5,23 @@ persistence.enableDSQLMode:
   - value: true
     constraints: {}
 
+# Advanced Visibility settings - CRITICAL for Elasticsearch integration
+system.enableReadFromClosedExecutionV2:
+  - value: true
+    constraints: {}
+
+system.advancedVisibilityWritingMode:
+  - value: "on"
+    constraints: {}
+
+system.enableReadVisibilityFromES:
+  - value: true
+    constraints: {}
+
+system.enableLogCustomerQueryParameter:
+  - value: true
+    constraints: {}
+
 # DSQL optimizations - higher retry counts due to optimistic concurrency control
 history.persistenceMaxQPS:
   - value: 3000
@@ -103,4 +120,22 @@ persistence.defaultActivityRetryPolicy:
 # DSQL connection health check
 persistence.healthCheckInterval:
   - value: 30s
+    constraints: {}
+
+# Nexus settings - DISABLE to avoid DSQL connection issues
+system.enableNexus:
+  - value: false
+    constraints: {}
+
+frontend.enableNexusAPIs:
+  - value: false
+    constraints: {}
+
+worker.enableNexus:
+  - value: false
+    constraints: {}
+
+# Disable Nexus endpoint registry to prevent DSQL queries
+system.nexusEndpointRegistryEnabled:
+  - value: false
     constraints: {}
