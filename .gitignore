@@ -22,9 +22,11 @@ server.chain.crt
 .env
 secrets/
 
-# Terraform state
+# Terraform state and plans
 terraform/*.tfstate*
 terraform/.terraform/
+terraform/tfplan
+*.tfplan
 
 # Virtual environments
 .venv
