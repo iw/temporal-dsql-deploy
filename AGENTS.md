@@ -395,25 +395,30 @@ This architecture provides a robust, cost-effective solution for running Tempora
 
 ## Critical Schema Setup Commands
 
-**IMPORTANT**: Always use the Helm chart approach for schema setup. These are the canonical commands:
+**IMPORTANT**: Use `temporal-dsql-tool` for DSQL schema setup. This is the canonical command:
 
 ```bash
-# 1. Create database (if needed)
-./temporal-sql-tool --database postgres create-database
-
-# 2. Setup base schema with version 0
-./temporal-sql-tool setup-schema -v 0
-
-# 3. Update schema to v1.0 using versioned files
-./temporal-sql-tool update-schema --schema-dir ../temporal-dsql/schema/dsql/v12/temporal/versioned
+# Setup schema using embedded DSQL schema (recommended)
+# Note: --version is required to create schema_version table needed by Temporal server
+./temporal-dsql-tool \
+    --endpoint "$CLUSTER_ENDPOINT" \
+    --region "$AWS_REGION" \
+    setup-schema \
+    --schema-name "dsql/v12/temporal" \
+    --version 1.12
 ```
 
-**For complete reset:**
+**For complete reset (with overwrite):**
 ```bash
-# Drop database (temporal-sql-tool supports this)
-./temporal-sql-tool --database postgres drop-database
-
-# Then follow the 3 steps above
+# Drop existing tables and recreate schema
+./temporal-dsql-tool \
+    --endpoint "$CLUSTER_ENDPOINT" \
+    --region "$AWS_REGION" \
+    setup-schema \
+    --schema-name "dsql/v12/temporal" \
+    --version 1.12 \
+    --overwrite
 ```
 
-**Never recreate custom table deletion scripts** - use temporal-sql-tool's built-in commands.
+**Note**: `temporal-dsql-tool` uses IAM authentication automatically and has the DSQL schema embedded.
+**Important**: Do NOT use `--disable-versioning` as Temporal server requires the `schema_version` table at startup.
