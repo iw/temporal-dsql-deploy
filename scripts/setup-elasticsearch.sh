@@ -36,10 +36,37 @@ if [ -n "$TEMPORAL_ES_TOOL" ]; then
     echo "=== Using temporal-elasticsearch-tool for Elasticsearch setup ==="
     echo ""
     
-    # Step 1: Setup schema (creates templates and cluster settings)
+    # Wait for Elasticsearch to be fully ready
+    echo "Waiting for Elasticsearch to be ready..."
+    max_attempts=30
+    attempt=0
+    until curl -s -f "$ES_SCHEME://$ES_HOST:$ES_PORT/_cluster/health?wait_for_status=yellow&timeout=5s" >/dev/null 2>&1; do
+        attempt=$((attempt + 1))
+        if [ $attempt -ge $max_attempts ]; then
+            echo "❌ Elasticsearch did not become ready after $max_attempts attempts"
+            exit 1
+        fi
+        echo "  Waiting... (attempt $attempt/$max_attempts)"
+        sleep 2
+    done
+    echo "✅ Elasticsearch is ready"
+    echo ""
+    
+    # Step 1: Setup schema (creates templates and cluster settings) with retry
     echo "Step 1: Setting up Elasticsearch schema..."
-    $TEMPORAL_ES_TOOL --ep "$ES_SCHEME://$ES_HOST:$ES_PORT" setup-schema
-    echo "✅ Schema setup completed"
+    for i in 1 2 3; do
+        if $TEMPORAL_ES_TOOL --ep "$ES_SCHEME://$ES_HOST:$ES_PORT" setup-schema 2>&1; then
+            echo "✅ Schema setup completed"
+            break
+        else
+            if [ $i -eq 3 ]; then
+                echo "❌ Schema setup failed after 3 attempts"
+                exit 1
+            fi
+            echo "  Retrying schema setup... (attempt $((i+1))/3)"
+            sleep 2
+        fi
+    done
     echo ""
     
     # Step 2: Create visibility index
