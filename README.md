@@ -101,6 +101,7 @@ terraform apply -var "project_name=my-temporal-test"
 ### 3. Setup Schema
 ```bash
 # Update .env with DSQL endpoint from Terraform output
+# Uses temporal-dsql-tool with embedded DSQL schema
 ./scripts/setup-schema.sh
 ```
 
@@ -132,7 +133,7 @@ temporal-dsql-deploy/
 ## Key Scripts
 
 - **`./scripts/deploy.sh`**: Infrastructure deployment + environment setup
-- **`./scripts/setup-schema.sh`**: Database schema initialization
+- **`./scripts/setup-schema.sh`**: Database schema initialization (uses temporal-dsql-tool)
 - **`./scripts/test.sh`**: Integration testing and validation
 - **`./scripts/cleanup.sh`**: Resource cleanup (Docker + AWS)
 - **`./scripts/build-temporal-dsql.sh`**: Docker image building
