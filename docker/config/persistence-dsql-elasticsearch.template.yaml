@@ -35,6 +35,10 @@ global:
     maxJoinDuration: 30s
   pprof:
     port: 7936
+  metrics:
+    prometheus:
+      timerType: histogram
+      listenAddress: "0.0.0.0:9090"
 
 services:
   frontend:

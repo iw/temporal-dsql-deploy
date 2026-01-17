@@ -17,17 +17,11 @@ datasources:
       prometheusType: Mimir
 
   # CloudWatch datasource for Aurora DSQL and other AWS metrics
-  # Requires AWS credentials via environment variables or IAM role
-  # Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION
-  # Or use IAM roles when running on EC2/ECS
+  # Uses AWS credentials from ~/.aws mounted into the container
   - name: CloudWatch
     type: cloudwatch
     access: proxy
     editable: true
     jsonData:
-      authType: default  # Uses default credential chain (env vars, IAM role, etc.)
-      defaultRegion: ${AWS_REGION:-us-east-1}
-    # For explicit credentials (not recommended for production):
-    # secureJsonData:
-    #   accessKey: ${AWS_ACCESS_KEY_ID}
-    #   secretKey: ${AWS_SECRET_ACCESS_KEY}
+      authType: default  # Uses default credential chain (~/.aws/credentials)
+      defaultRegion: eu-west-1
