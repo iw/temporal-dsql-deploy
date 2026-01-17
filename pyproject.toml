@@ -9,13 +9,8 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "boto3>=1.42.3,<2",
-    "pydantic-settings>=2.12.0",
     "temporalio>=1.21.1",
-    "typer>=0.20.0",
 ]
-
-[project.scripts]
-dsql-deploy = "temporal_dsql_deploy.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
