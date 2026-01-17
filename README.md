@@ -9,7 +9,7 @@ Streamlined deployment for Temporal with Aurora DSQL persistence and local Elast
 ### Prerequisites
 - Docker and Docker Compose
 - AWS CLI configured with appropriate permissions
-- Built Temporal DSQL runtime image (`temporal-dsql-runtime:test`)
+- [temporal-dsql](https://github.com/iw/temporal) - Custom Temporal fork with DSQL persistence support (build the runtime image first)
 
 ### 1. Deploy Infrastructure
 ```bash
@@ -31,8 +31,10 @@ Streamlined deployment for Temporal with Aurora DSQL persistence and local Elast
 
 ### 4. Access Services
 - **Temporal UI**: http://localhost:8080
+- **Grafana**: http://localhost:3000 (admin/admin)
 - **Elasticsearch**: http://localhost:9200
 - **Temporal gRPC**: localhost:7233
+- **Alloy UI**: http://localhost:12345
 
 ### 5. Cleanup
 ```bash
@@ -205,9 +207,6 @@ curl http://localhost:9200/_cluster/health
 
 # Test Temporal connectivity
 nc -z localhost 7233
-
-# List DSQL tables (if psql available)
-psql -h your-cluster-id.dsql.region.on.aws -U admin -d postgres -c "\dt"
 ```
 
 ## Development Notes
@@ -228,3 +227,16 @@ For production deployment, consider:
 - Elasticsearch authentication and encryption
 - AWS Secrets Manager for credential management
 - Multi-AZ deployment for high availability
+
+## Related Projects
+
+- [temporal-dsql](https://github.com/iw/temporal) - Custom Temporal fork with Aurora DSQL persistence support
+- [temporal-dsql-deploy-ecs](https://github.com/iw/temporal-dsql-deploy-ecs) - Production ECS deployment with Terraform
+
+## Acknowledgments
+
+This project was developed with significant assistance from [Kiro](https://kiro.dev), an AI-powered IDE.
+
+## License
+
+Apache 2.0

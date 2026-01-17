@@ -75,15 +75,15 @@ elif [ -f "Makefile" ] && grep -q "temporal-server" Makefile; then
     echo "Building temporal-server binary for $TARGET_ARCH..."
     GOOS=linux GOARCH=$TARGET_ARCH CGO_ENABLED=0 make temporal-server
     
-    echo "Building temporal-sql-tool binary for $TARGET_ARCH..."
-    GOOS=linux GOARCH=$TARGET_ARCH CGO_ENABLED=0 make temporal-sql-tool
+    echo "Building temporal-dsql-tool binary for $TARGET_ARCH..."
+    GOOS=linux GOARCH=$TARGET_ARCH CGO_ENABLED=0 go build -o temporal-dsql-tool ./cmd/tools/dsql
     
     # Temporarily modify .dockerignore to allow temporal binaries
     echo "Temporarily modifying .dockerignore to include temporal binaries..."
     if [ -f ".dockerignore" ]; then
         cp .dockerignore .dockerignore.backup
         # Remove temporal binaries from .dockerignore temporarily
-        grep -v -E "^temporal-(server|sql-tool)$" .dockerignore > .dockerignore.tmp
+        grep -v -E "^temporal-(server|dsql-tool)$" .dockerignore > .dockerignore.tmp
         mv .dockerignore.tmp .dockerignore
     fi
     
@@ -118,9 +118,9 @@ RUN mkdir -p /etc/temporal/config/dynamicconfig \\
 COPY temporal-server /usr/local/bin/temporal-server
 RUN chmod +x /usr/local/bin/temporal-server
 
-# Copy the temporal-sql-tool binary for schema management
-COPY temporal-sql-tool /usr/local/bin/temporal-sql-tool
-RUN chmod +x /usr/local/bin/temporal-sql-tool
+# Copy the temporal-dsql-tool binary for schema management
+COPY temporal-dsql-tool /usr/local/bin/temporal-dsql-tool
+RUN chmod +x /usr/local/bin/temporal-dsql-tool
 
 # Note: Config files will be provided via volume mounts or environment variables
 RUN echo "Using default configuration - config files should be provided via volume mounts"

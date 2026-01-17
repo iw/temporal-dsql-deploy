@@ -230,6 +230,9 @@ services:
   temporal-frontend:  # API gateway
   temporal-worker:    # System workflows
   temporal-ui:        # Web interface
+  mimir:              # Metrics storage (Prometheus-compatible)
+  alloy:              # Metrics collection (scrapes Temporal services)
+  grafana:            # Dashboards and visualization
 ```
 
 ### Persistence Configuration
@@ -383,6 +386,7 @@ docker compose restart
 - **Schema Management**: Automated setup using temporal-sql-tool
 - **Testing Framework**: Comprehensive integration testing
 - **Documentation**: Complete setup and operational guides
+- **Observability Stack**: Grafana + Alloy + Mimir for metrics and dashboards
 
 ### 🚀 Production Ready
 - **Core Functionality**: All Temporal features working with DSQL + Elasticsearch
