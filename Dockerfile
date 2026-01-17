@@ -48,8 +48,9 @@ RUN test -f /etc/temporal/entrypoint.sh || (echo "ERROR: Base image missing /etc
 RUN test -d /etc/temporal/config || mkdir -p /etc/temporal/config
 RUN python3 --version || (echo "ERROR: Base image missing python3" && exit 1)
 
+# Copy persistence templates - elasticsearch template is the primary one used by docker-compose
+COPY docker/config/persistence-dsql-elasticsearch.template.yaml /etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
 COPY docker/config/persistence-dsql.template.yaml /etc/temporal/config/persistence-dsql.template.yaml
-COPY docker/config/persistence-dsql-multiservice.template.yaml /etc/temporal/config/persistence-dsql-multiservice.template.yaml
 COPY docker/config/dynamicconfig.yaml /etc/temporal/config/dynamicconfig.yaml
 COPY docker/render-and-start.sh /usr/local/bin/render-and-start.sh
 

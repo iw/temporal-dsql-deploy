@@ -126,18 +126,6 @@ PROJECT_NAME="my-temporal-test" ./scripts/deploy.sh
 ./scripts/setup-elasticsearch.sh
 ```
 
-## Utility Scripts
-
-### `test-dsql-connectivity.sh`
-**DSQL connection testing**
-- Tests basic DSQL connectivity
-- Validates IAM authentication
-- Checks cluster status
-
-```bash
-./scripts/test-dsql-connectivity.sh
-```
-
 ## Usage Patterns
 
 ### Complete Setup (Recommended)
@@ -189,16 +177,6 @@ docker compose up -d
 ./scripts/setup-elasticsearch.sh
 
 # 7. Test
-./scripts/test.sh
-```
-
-# 4. Start services
-docker compose up -d
-
-# 5. Setup Elasticsearch
-./scripts/setup-elasticsearch.sh
-
-# 6. Test
 ./scripts/test.sh
 ```
 
