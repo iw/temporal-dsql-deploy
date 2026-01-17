@@ -37,6 +37,7 @@ global:
     port: 7936
   metrics:
     prometheus:
+      framework: opentelemetry
       timerType: histogram
       listenAddress: "0.0.0.0:9090"
 
