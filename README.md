@@ -206,8 +206,8 @@ Two pre-configured dashboards are included:
 │ Temporal        │────▶│ Alloy       │────▶│ Mimir       │────▶│ Grafana     │
 │ Services :9090  │     │ (scraper)   │     │ (storage)   │     │ (dashboards)│
 └─────────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+                                                                       ▲
                                                                        │
-                                                                       ▼
                                                               ┌─────────────┐
                                                               │ CloudWatch  │
                                                               │ (AWS DSQL)  │
