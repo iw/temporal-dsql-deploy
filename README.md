@@ -36,72 +36,6 @@ Streamlined deployment for Temporal with Aurora DSQL persistence and local Elast
 - **Temporal gRPC**: localhost:7233
 - **Alloy UI**: http://localhost:12345
 
-## Observability
-
-### Grafana Dashboards
-
-Two pre-configured dashboards are included:
-
-1. **Temporal Server Dashboard** (`grafana/server/server.json`)
-   - Service request rates and latencies
-   - Workflow execution outcomes
-   - History task processing
-   - Persistence latency by operation
-   - Shard health monitoring
-
-2. **DSQL Persistence Dashboard** (`grafana/dsql/persistence.json`)
-   - Connection pool utilization (max_open, open, in_use, idle)
-   - Transaction conflicts and retries (OCC metrics)
-   - CloudWatch metrics for DSQL cluster health
-   - DPU usage and commit latency
-
-### Metrics Architecture
-
-```
-┌─────────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ Temporal        │────▶│ Alloy       │────▶│ Mimir       │────▶│ Grafana     │
-│ Services :9090  │     │ (scraper)   │     │ (storage)   │     │ (dashboards)│
-└─────────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-                                                                       │
-                                                                       ▼
-                                                              ┌─────────────┐
-                                                              │ CloudWatch  │
-                                                              │ (AWS DSQL)  │
-                                                              └─────────────┘
-```
-
-- **Prometheus metrics**: Exposed by Temporal services on port 9090
-- **Alloy**: Scrapes metrics from all Temporal services
-- **Mimir**: Prometheus-compatible long-term storage
-- **Grafana**: Visualization with Mimir and CloudWatch datasources
-
-### CloudWatch Integration
-
-The DSQL dashboard includes AWS CloudWatch metrics for the Aurora DSQL cluster:
-- BytesRead/BytesWritten throughput
-- CommitLatency and TotalTransactions
-- DPU (Database Processing Units) usage
-- OCC (Optimistic Concurrency Control) conflicts
-
-**Setup**: CloudWatch queries require AWS credentials. The Grafana container mounts `~/.aws` for credential access. Set the DSQL cluster identifier in the dashboard variable.
-
-### DSQL Plugin Metrics
-
-The custom DSQL plugin emits these metrics (requires `framework: opentelemetry` in config):
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `dsql_pool_max_open` | Gauge | Maximum configured connections |
-| `dsql_pool_open` | Gauge | Currently open connections |
-| `dsql_pool_in_use` | Gauge | Connections actively in use |
-| `dsql_pool_idle` | Gauge | Idle connections in pool |
-| `dsql_pool_wait_total` | Counter | Requests that waited for a connection |
-| `dsql_pool_wait_duration` | Histogram | Time spent waiting for connections |
-| `dsql_tx_conflict_total` | Counter | Transaction serialization conflicts |
-| `dsql_tx_retry_total` | Counter | Transaction retry attempts |
-| `dsql_tx_exhausted_total` | Counter | Retries exhausted (failures) |
-| `dsql_tx_latency` | Histogram | Transaction latency including retries |
-
 ### 5. Cleanup
 ```bash
 # Stop services and optionally destroy AWS resources
@@ -245,6 +179,72 @@ project_name = "temporal-test"
 # Optional
 region = "eu-west-1"  # Default
 ```
+
+## Observability
+
+### Grafana Dashboards
+
+Two pre-configured dashboards are included:
+
+1. **Temporal Server Dashboard** (`grafana/server/server.json`)
+   - Service request rates and latencies
+   - Workflow execution outcomes
+   - History task processing
+   - Persistence latency by operation
+   - Shard health monitoring
+
+2. **DSQL Persistence Dashboard** (`grafana/dsql/persistence.json`)
+   - Connection pool utilization (max_open, open, in_use, idle)
+   - Transaction conflicts and retries (OCC metrics)
+   - CloudWatch metrics for DSQL cluster health
+   - DPU usage and commit latency
+
+### Metrics Architecture
+
+```
+┌─────────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ Temporal        │────▶│ Alloy       │────▶│ Mimir       │────▶│ Grafana     │
+│ Services :9090  │     │ (scraper)   │     │ (storage)   │     │ (dashboards)│
+└─────────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+                                                                       │
+                                                                       ▼
+                                                              ┌─────────────┐
+                                                              │ CloudWatch  │
+                                                              │ (AWS DSQL)  │
+                                                              └─────────────┘
+```
+
+- **Prometheus metrics**: Exposed by Temporal services on port 9090
+- **Alloy**: Scrapes metrics from all Temporal services
+- **Mimir**: Prometheus-compatible long-term storage
+- **Grafana**: Visualization with Mimir and CloudWatch datasources
+
+### CloudWatch Integration
+
+The DSQL dashboard includes AWS CloudWatch metrics for the Aurora DSQL cluster:
+- BytesRead/BytesWritten throughput
+- CommitLatency and TotalTransactions
+- DPU (Database Processing Units) usage
+- OCC (Optimistic Concurrency Control) conflicts
+
+**Setup**: CloudWatch queries require AWS credentials. The Grafana container mounts `~/.aws` for credential access. Set the DSQL cluster identifier in the dashboard variable.
+
+### DSQL Plugin Metrics
+
+The custom DSQL plugin emits these metrics (requires `framework: opentelemetry` in config):
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `dsql_pool_max_open` | Gauge | Maximum configured connections |
+| `dsql_pool_open` | Gauge | Currently open connections |
+| `dsql_pool_in_use` | Gauge | Connections actively in use |
+| `dsql_pool_idle` | Gauge | Idle connections in pool |
+| `dsql_pool_wait_total` | Counter | Requests that waited for a connection |
+| `dsql_pool_wait_duration` | Histogram | Time spent waiting for connections |
+| `dsql_tx_conflict_total` | Counter | Transaction serialization conflicts |
+| `dsql_tx_retry_total` | Counter | Transaction retry attempts |
+| `dsql_tx_exhausted_total` | Counter | Retries exhausted (failures) |
+| `dsql_tx_latency` | Histogram | Transaction latency including retries |
 
 ## Troubleshooting
 
