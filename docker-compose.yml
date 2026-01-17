@@ -257,9 +257,18 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      # AWS credentials for CloudWatch datasource (uses default credential chain)
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      # Uncomment to use explicit credentials (not recommended for production)
+      # - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      # - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     volumes:
       - ./docker/config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./docker/config/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./grafana:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
+      # Mount AWS credentials for CloudWatch access
+      - ~/.aws:/usr/share/grafana/.aws:ro
     ports:
       - "3000:3000"
     networks:

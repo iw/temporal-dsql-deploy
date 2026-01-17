@@ -1,0 +1,422 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus data source for DSQL metrics emitted by Temporal server",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    },
+    {
+      "name": "DS_CLOUDWATCH",
+      "label": "CloudWatch",
+      "description": "CloudWatch data source for Aurora DSQL service metrics",
+      "type": "datasource",
+      "pluginId": "cloudwatch",
+      "pluginName": "CloudWatch"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "9.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
+    { "type": "datasource", "id": "cloudwatch", "name": "CloudWatch", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "text", "name": "Text", "version": "" },
+    { "type": "panel", "id": "row", "name": "Row", "version": "" }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": false,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Aurora DSQL persistence metrics for Temporal. Includes application-level metrics from Temporal's DSQL plugin and AWS CloudWatch metrics from the DSQL service.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "iteration": 1,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": ["temporal"],
+      "targetBlank": true,
+      "title": "Temporal Server Dashboard",
+      "type": "dashboards"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "DSQL Persistence Overview",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "## Aurora DSQL Persistence Dashboard\n\nThis dashboard monitors Aurora DSQL as Temporal's persistence layer. It combines:\n\n- **Application Metrics** (Prometheus): Transaction conflicts, retries, connection pool usage from Temporal's DSQL plugin\n- **Service Metrics** (CloudWatch): DSQL cluster health, throughput, and latency from AWS\n\n### Key Concepts\n\n**Optimistic Concurrency Control (OCC)**: DSQL uses OCC instead of traditional locking. Concurrent transactions may conflict and require retries. Some conflicts are normal under load.\n\n**Connection Pool**: Temporal maintains a connection pool to DSQL. Pool exhaustion causes request queuing.\n\n### Troubleshooting Flow\n\n1. **High latency?** → Check CloudWatch cluster metrics first\n2. **Many conflicts?** → Check transaction conflict rate and retry success\n3. **Requests queuing?** → Check connection pool utilization\n\n### CloudWatch Costs\n\nDSQL publishes metrics to CloudWatch. Costs depend on:\n- **Metrics stored**: First 10K metrics = $0.30/metric/month, then $0.10/metric/month\n- **API requests**: First 1M free, then $0.01 per 1,000 requests\n- **GetMetricData**: $0.01 per 1,000 metrics analyzed (console queries are free)\n\nFor a single DSQL cluster, expect ~$5-15/month for CloudWatch metrics."
+      }
+    },
+
+    { "id": 2, "type": "row", "title": "DSQL Transaction Health (Application Metrics)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 }, "collapsed": false, "panels": [] },
+
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Conflict Rate",
+      "description": "Transaction conflicts per second. Some conflicts are normal with OCC. Sustained high rates may indicate hot spots.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "ops", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 50 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(dsql_tx_conflict_total[1m]))", "legendFormat": "conflicts/sec" }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Retry Rate",
+      "description": "Transaction retries per second. Retries are automatic and expected. Watch for sustained high rates.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "ops", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 20 }, { "color": "red", "value": 100 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(dsql_tx_retry_total[1m]))", "legendFormat": "retries/sec" }]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Exhausted (Failures)",
+      "description": "Transactions that failed after max retries. Should be zero. Non-zero indicates severe contention or DSQL issues.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "ops", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(dsql_tx_exhausted_total[1m]))", "legendFormat": "exhausted/sec" }]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Tx Latency p95",
+      "description": "95th percentile transaction latency including retries. High values indicate DSQL slowness or retry overhead.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.1 }, { "color": "red", "value": 0.5 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_tx_latency_bucket[5m])))", "legendFormat": "p95" }]
+    },
+
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Transaction Conflicts & Retries",
+      "description": "DSQL uses optimistic concurrency control. Conflicts (SQLSTATE 40001) are expected under concurrent load and are automatically retried. High conflict rates may indicate hot spots or need for backoff tuning.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(dsql_tx_conflict_total[1m]))", "legendFormat": "conflicts/sec" },
+        { "refId": "B", "expr": "sum(rate(dsql_tx_retry_total[1m]))", "legendFormat": "retries/sec" },
+        { "refId": "C", "expr": "sum(rate(dsql_tx_exhausted_total[1m]))", "legendFormat": "exhausted/sec (failures)" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Transaction Latency",
+      "description": "End-to-end transaction latency including retries. Compare with persistence_latency to understand retry overhead. High latency with low conflicts suggests database-side slowness.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(dsql_tx_latency_bucket[5m])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_tx_latency_bucket[5m])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(dsql_tx_latency_bucket[5m])))", "legendFormat": "p99" }
+      ]
+    },
+
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Retry Attempts by Operation",
+      "description": "Breakdown of retry attempts by database operation. Helps identify which operations are experiencing the most contention.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [{ "refId": "A", "expr": "topk(10, sum by (operation) (rate(dsql_tx_retry_total[1m])))", "legendFormat": "{{operation}}" }]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Backoff Duration",
+      "description": "Time spent in backoff delays during retries. High backoff times indicate the system is throttling to avoid overwhelming DSQL.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(dsql_tx_backoff_bucket[5m])))", "legendFormat": "p50 backoff" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_tx_backoff_bucket[5m])))", "legendFormat": "p95 backoff" }
+      ]
+    },
+
+    {
+      "id": 11,
+      "type": "text",
+      "title": "Transaction Health Interpretation",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 27 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Reading these metrics**: Some transaction conflicts are normal with DSQL's optimistic concurrency control. The retry logic handles these automatically. Watch for:\n- **exhausted/sec > 0**: Retries failed after max attempts - indicates severe contention or DSQL issues\n- **High p99 latency with low conflicts**: Database-side issue - check CloudWatch metrics below\n- **Specific operations with high retries**: May indicate hot spots in workflow patterns"
+      }
+    },
+
+    { "id": 12, "type": "row", "title": "Connection Pool (Application Metrics)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 }, "collapsed": false, "panels": [] },
+
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Connection Pool Utilization",
+      "description": "Connection pool state. pool_in_use approaching pool_max_open indicates pool exhaustion risk. pool_idle shows available capacity.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(dsql_pool_max_open)", "legendFormat": "max_open" },
+        { "refId": "B", "expr": "sum(dsql_pool_open)", "legendFormat": "open" },
+        { "refId": "C", "expr": "sum(dsql_pool_in_use)", "legendFormat": "in_use" },
+        { "refId": "D", "expr": "sum(dsql_pool_idle)", "legendFormat": "idle" }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Connection Pool Wait",
+      "description": "Requests waiting for connections. Sustained waits indicate need for larger pool or connection leak.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(dsql_pool_wait_total[1m]))", "legendFormat": "waits/sec" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_pool_wait_duration_bucket[5m])))", "legendFormat": "wait duration p95" }
+      ]
+    },
+
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Pool Utilization %",
+      "description": "Percentage of max connections currently in use. Above 80% is a warning sign.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 39 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.7 }, { "color": "red", "value": 0.9 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [{ "refId": "A", "expr": "sum(dsql_pool_in_use) / sum(dsql_pool_max_open)", "legendFormat": "utilization" }]
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Idle Connections",
+      "description": "Available connections ready for use. Zero idle with high utilization indicates pool exhaustion.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 39 },
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 2 }, { "color": "green", "value": 5 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [{ "refId": "A", "expr": "sum(dsql_pool_idle)", "legendFormat": "idle" }]
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Max Open Connections",
+      "description": "Configured maximum connections. Increase if pool utilization is consistently high.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 39 },
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+      "targets": [{ "refId": "A", "expr": "sum(dsql_pool_max_open)", "legendFormat": "max_open" }]
+    },
+
+    {
+      "id": 18,
+      "type": "text",
+      "title": "Connection Pool Interpretation",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 43 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Reading these metrics**: The connection pool manages database connections efficiently. Watch for:\n- **pool_in_use ≈ pool_max_open**: Connection pool exhaustion - increase pool size or reduce concurrency\n- **Sustained waits**: Requests are queuing for connections - indicates pool is undersized\n- **Zero idle with high load**: Pool is fully utilized - consider increasing max_open"
+      }
+    },
+
+    { "id": 19, "type": "row", "title": "Error Classification (Application Metrics)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 }, "collapsed": false, "panels": [] },
+
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Errors by Class",
+      "description": "DSQL errors categorized by type. serialization_failure is expected under load. connection_error indicates network issues.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 47 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [{ "refId": "A", "expr": "sum by (error_class) (rate(dsql_tx_error_class_total[1m]))", "legendFormat": "{{error_class}}" }]
+    },
+
+    { "id": 21, "type": "row", "title": "Aurora DSQL Service Metrics (CloudWatch)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 55 }, "collapsed": false, "panels": [] },
+
+    {
+      "id": 22,
+      "type": "text",
+      "title": "CloudWatch Metrics Note",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 56 },
+      "options": {
+        "mode": "markdown",
+        "content": "**CloudWatch Data Source Required**: The panels below require a CloudWatch data source configured with appropriate IAM permissions. If you see \"No data\" or errors, ensure:\n1. CloudWatch data source is configured in Grafana\n2. IAM role/user has `cloudwatch:GetMetricData` permission\n3. The correct AWS region is selected\n\n**Note**: CloudWatch queries incur costs. See the overview panel for pricing details."
+      }
+    },
+
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "DSQL Read/Write Throughput",
+      "description": "Database read and write operations from CloudWatch. Shows actual DSQL cluster activity.",
+      "datasource": { "type": "cloudwatch", "uid": "${DS_CLOUDWATCH}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 59 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/DSQL",
+          "metricName": "ReadRequests",
+          "statistics": ["Sum"],
+          "dimensions": { "ClusterIdentifier": "$dsql_cluster" },
+          "period": "60",
+          "legendFormat": "reads/min"
+        },
+        {
+          "refId": "B",
+          "namespace": "AWS/DSQL",
+          "metricName": "WriteRequests",
+          "statistics": ["Sum"],
+          "dimensions": { "ClusterIdentifier": "$dsql_cluster" },
+          "period": "60",
+          "legendFormat": "writes/min"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "DSQL Latency (CloudWatch)",
+      "description": "Database latency from CloudWatch. Shows actual DSQL response times.",
+      "datasource": { "type": "cloudwatch", "uid": "${DS_CLOUDWATCH}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 59 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/DSQL",
+          "metricName": "ReadLatency",
+          "statistics": ["Average"],
+          "dimensions": { "ClusterIdentifier": "$dsql_cluster" },
+          "period": "60",
+          "legendFormat": "read latency (avg)"
+        },
+        {
+          "refId": "B",
+          "namespace": "AWS/DSQL",
+          "metricName": "WriteLatency",
+          "statistics": ["Average"],
+          "dimensions": { "ClusterIdentifier": "$dsql_cluster" },
+          "period": "60",
+          "legendFormat": "write latency (avg)"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "DSQL Connections (CloudWatch)",
+      "description": "Active database connections from CloudWatch. Compare with application pool metrics.",
+      "datasource": { "type": "cloudwatch", "uid": "${DS_CLOUDWATCH}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 67 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/DSQL",
+          "metricName": "DatabaseConnections",
+          "statistics": ["Average"],
+          "dimensions": { "ClusterIdentifier": "$dsql_cluster" },
+          "period": "60",
+          "legendFormat": "connections"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "DSQL Transaction Conflicts (CloudWatch)",
+      "description": "Transaction conflicts reported by DSQL service. Compare with application-level conflict metrics.",
+      "datasource": { "type": "cloudwatch", "uid": "${DS_CLOUDWATCH}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 67 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/DSQL",
+          "metricName": "TransactionConflicts",
+          "statistics": ["Sum"],
+          "dimensions": { "ClusterIdentifier": "$dsql_cluster" },
+          "period": "60",
+          "legendFormat": "conflicts"
+        }
+      ]
+    }
+  ],
+
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["temporal", "dsql", "persistence", "aurora"],
+  "templating": {
+    "list": [
+      {
+        "name": "dsql_cluster",
+        "label": "DSQL Cluster",
+        "type": "textbox",
+        "description": "Aurora DSQL cluster identifier for CloudWatch metrics",
+        "current": { "text": "", "value": "" }
+      }
+    ]
+  },
+  "time": { "from": "now-30m", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"],
+    "time_options": ["5m", "15m", "30m", "1h", "6h"]
+  },
+  "timezone": "browser",
+  "title": "DSQL Persistence",
+  "uid": "dsql-persistence",
+  "version": 1,
+  "weekStart": ""
+}

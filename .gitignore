@@ -8,7 +8,7 @@ wheels/
 
 # Generated certificates and keys (NEVER commit these!)
 certs/
-server/
+/server/
 clients/
 .acm/
 *.key
