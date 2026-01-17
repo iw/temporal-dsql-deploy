@@ -471,10 +471,10 @@
         "label": "DSQL Cluster",
         "type": "textbox",
         "description": "Aurora DSQL cluster identifier for CloudWatch metrics",
-        "query": "YOUR_DSQL_CLUSTER_ID",
+        "query": "",
         "current": {
-          "text": "YOUR_DSQL_CLUSTER_ID",
-          "value": "YOUR_DSQL_CLUSTER_ID"
+          "text": "",
+          "value": ""
         }
       }
     ]
