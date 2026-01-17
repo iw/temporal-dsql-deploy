@@ -1,0 +1,46 @@
+// Grafana Alloy configuration for Temporal metrics collection
+// This configuration scrapes Prometheus metrics from all Temporal services
+
+// Prometheus scrape configuration for Temporal services
+prometheus.scrape "temporal_history" {
+  targets = [{
+    __address__ = "temporal-history:9090",
+  }]
+  forward_to = [prometheus.remote_write.local.receiver]
+  scrape_interval = "15s"
+  job_name = "temporal-history"
+}
+
+prometheus.scrape "temporal_matching" {
+  targets = [{
+    __address__ = "temporal-matching:9090",
+  }]
+  forward_to = [prometheus.remote_write.local.receiver]
+  scrape_interval = "15s"
+  job_name = "temporal-matching"
+}
+
+prometheus.scrape "temporal_frontend" {
+  targets = [{
+    __address__ = "temporal-frontend:9090",
+  }]
+  forward_to = [prometheus.remote_write.local.receiver]
+  scrape_interval = "15s"
+  job_name = "temporal-frontend"
+}
+
+prometheus.scrape "temporal_worker" {
+  targets = [{
+    __address__ = "temporal-worker:9090",
+  }]
+  forward_to = [prometheus.remote_write.local.receiver]
+  scrape_interval = "15s"
+  job_name = "temporal-worker"
+}
+
+// Remote write to local Prometheus (Mimir)
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://mimir:9009/api/v1/push"
+  }
+}

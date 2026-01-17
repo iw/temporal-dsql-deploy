@@ -1,9 +1,8 @@
-version: "3.8"
-
 services:
   # Elasticsearch for visibility store
   elasticsearch:
     container_name: temporal-elasticsearch
+    platform: linux/arm64
     image: elasticsearch:8.11.0
     environment:
       - cluster.routing.allocation.disk.threshold_enabled=true
@@ -40,6 +39,8 @@ services:
   # History service - starts after elasticsearch is ready
   temporal-history:
     container_name: temporal-dsql-history
+    hostname: temporal-history
+    platform: linux/arm64
     image: temporal-dsql-runtime:test
     depends_on:
       elasticsearch:
@@ -55,9 +56,15 @@ services:
     environment:
       - AWS_EC2_METADATA_DISABLED=true
       - TEMPORAL_PERSISTENCE_TEMPLATE=/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
+      # Fast iteration testing - short token duration (2 min) to test token refresh
+      - DSQL_TOKEN_DURATION=2m
+      # Disable staggered startup for faster local testing
+      - DSQL_STAGGERED_STARTUP=false
     ports:
       - "7234:7234" # gRPC
       - "6934:6934" # Membership
+    expose:
+      - "9090" # Prometheus metrics (internal only)
     networks:
       - temporal-network
     restart: unless-stopped
@@ -71,6 +78,8 @@ services:
   # Matching service - depends on history and elasticsearch
   temporal-matching:
     container_name: temporal-dsql-matching
+    hostname: temporal-matching
+    platform: linux/arm64
     image: temporal-dsql-runtime:test
     depends_on:
       elasticsearch:
@@ -88,9 +97,15 @@ services:
     environment:
       - AWS_EC2_METADATA_DISABLED=true
       - TEMPORAL_PERSISTENCE_TEMPLATE=/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
+      # Fast iteration testing - short token duration (2 min) to test token refresh
+      - DSQL_TOKEN_DURATION=2m
+      # Disable staggered startup for faster local testing
+      - DSQL_STAGGERED_STARTUP=false
     ports:
       - "7235:7235" # gRPC
       - "6935:6935" # Membership
+    expose:
+      - "9090" # Prometheus metrics (internal only)
     networks:
       - temporal-network
     restart: unless-stopped
@@ -98,6 +113,8 @@ services:
   # Frontend service - depends on history + matching + elasticsearch
   temporal-frontend:
     container_name: temporal-dsql-frontend
+    hostname: temporal-frontend
+    platform: linux/arm64
     image: temporal-dsql-runtime:test
     depends_on:
       elasticsearch:
@@ -117,10 +134,16 @@ services:
     environment:
       - AWS_EC2_METADATA_DISABLED=true
       - TEMPORAL_PERSISTENCE_TEMPLATE=/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
+      # Fast iteration testing - short token duration (2 min) to test token refresh
+      - DSQL_TOKEN_DURATION=2m
+      # Disable staggered startup for faster local testing
+      - DSQL_STAGGERED_STARTUP=false
     ports:
       - "7233:7233" # gRPC
       - "8233:8233" # HTTP
       - "6933:6933" # Membership
+    expose:
+      - "9090" # Prometheus metrics (internal only)
     networks:
       - temporal-network
     restart: unless-stopped
@@ -134,6 +157,8 @@ services:
   # Worker service - depends on frontend + history + elasticsearch
   temporal-worker:
     container_name: temporal-dsql-worker
+    hostname: temporal-worker
+    platform: linux/arm64
     image: temporal-dsql-runtime:test
     depends_on:
       elasticsearch:
@@ -153,9 +178,15 @@ services:
     environment:
       - AWS_EC2_METADATA_DISABLED=true
       - TEMPORAL_PERSISTENCE_TEMPLATE=/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
+      # Fast iteration testing - short token duration (2 min) to test token refresh
+      - DSQL_TOKEN_DURATION=2m
+      # Disable staggered startup for faster local testing
+      - DSQL_STAGGERED_STARTUP=false
     ports:
       - "7239:7239" # gRPC (worker service port)
       - "6939:6939" # Membership
+    expose:
+      - "9090" # Prometheus metrics (internal only)
     networks:
       - temporal-network
     restart: unless-stopped
@@ -163,6 +194,7 @@ services:
   # Temporal UI
   temporal-ui:
     container_name: temporal-dsql-ui
+    platform: linux/arm64
     image: temporalio/ui:latest
     depends_on:
       temporal-frontend:
@@ -176,8 +208,72 @@ services:
       - temporal-network
     restart: unless-stopped
 
+  # Mimir for metrics storage (lightweight Prometheus-compatible TSDB)
+  mimir:
+    container_name: temporal-mimir
+    platform: linux/arm64
+    image: grafana/mimir:latest
+    command:
+      - --config.file=/etc/mimir/mimir.yaml
+    volumes:
+      - ./docker/config/mimir.yaml:/etc/mimir/mimir.yaml:ro
+      - mimir-data:/data
+    ports:
+      - "9009:9009"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+
+  # Grafana Alloy for metrics collection (scrapes Temporal services)
+  alloy:
+    container_name: temporal-alloy
+    platform: linux/arm64
+    image: grafana/alloy:latest
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+    volumes:
+      - ./docker/config/alloy-config.alloy:/etc/alloy/config.alloy:ro
+    ports:
+      - "12345:12345"
+    networks:
+      - temporal-network
+    depends_on:
+      - mimir
+      - temporal-history
+      - temporal-matching
+      - temporal-frontend
+      - temporal-worker
+    restart: unless-stopped
+
+  # Grafana for dashboards and visualization
+  grafana:
+    container_name: temporal-grafana
+    platform: linux/arm64
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./docker/config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - temporal-network
+    depends_on:
+      - mimir
+    restart: unless-stopped
+
 volumes:
   elasticsearch-data:
+    driver: local
+  mimir-data:
+    driver: local
+  grafana-data:
     driver: local
 
 networks:
