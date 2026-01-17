@@ -69,10 +69,29 @@ if [ -n "$TEMPORAL_ES_TOOL" ]; then
     done
     echo ""
     
-    # Step 2: Create visibility index
-    echo "Step 2: Creating visibility index..."
-    $TEMPORAL_ES_TOOL --ep "$ES_SCHEME://$ES_HOST:$ES_PORT" create-index --index "$ES_VISIBILITY_INDEX"
-    echo "✅ Index '$ES_VISIBILITY_INDEX' created successfully"
+    # Step 2: Check if index exists and has correct mappings
+    echo "Step 2: Checking visibility index..."
+    INDEX_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" "$ES_SCHEME://$ES_HOST:$ES_PORT/$ES_VISIBILITY_INDEX")
+    
+    if [ "$INDEX_EXISTS" = "200" ]; then
+        # Check if CloseTime mapping exists and is correct type
+        CLOSETIME_TYPE=$(curl -s "$ES_SCHEME://$ES_HOST:$ES_PORT/$ES_VISIBILITY_INDEX/_mapping" | grep -o '"CloseTime":{[^}]*"type":"[^"]*"' | grep -o '"type":"[^"]*"' | head -1 || echo "")
+        
+        if [ -z "$CLOSETIME_TYPE" ] || [[ "$CLOSETIME_TYPE" != *"date"* ]]; then
+            echo "  Index exists but has incorrect mappings (missing CloseTime or wrong type)"
+            echo "  Deleting and recreating index..."
+            curl -s -X DELETE "$ES_SCHEME://$ES_HOST:$ES_PORT/$ES_VISIBILITY_INDEX" >/dev/null
+            sleep 1
+            $TEMPORAL_ES_TOOL --ep "$ES_SCHEME://$ES_HOST:$ES_PORT" create-index --index "$ES_VISIBILITY_INDEX"
+            echo "✅ Index '$ES_VISIBILITY_INDEX' recreated with correct mappings"
+        else
+            echo "✅ Index '$ES_VISIBILITY_INDEX' already exists with correct mappings"
+        fi
+    else
+        # Create new index
+        $TEMPORAL_ES_TOOL --ep "$ES_SCHEME://$ES_HOST:$ES_PORT" create-index --index "$ES_VISIBILITY_INDEX"
+        echo "✅ Index '$ES_VISIBILITY_INDEX' created successfully"
+    fi
     echo ""
     
     # Step 3: Verify setup with ping

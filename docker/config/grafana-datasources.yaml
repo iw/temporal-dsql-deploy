@@ -1,0 +1,16 @@
+# Grafana datasource provisioning
+# Auto-configures Mimir as the default Prometheus datasource
+
+apiVersion: 1
+
+datasources:
+  - name: Mimir
+    type: prometheus
+    access: proxy
+    url: http://mimir:9009/prometheus
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Mimir
