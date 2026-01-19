@@ -6,12 +6,12 @@ readme = "README.md"
 authors = [
     { name = "Ian Wilkinson", email = "ianw1@me.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 dependencies = [
     "boto3>=1.42.3,<2",
     "temporalio>=1.21.1",
 ]
 
-[build-system]
-requires = ["uv_build>=0.9.7,<0.10.0"]
-build-backend = "uv_build"
+[tool.uv]
+# No package to build - this is a scripts-only project
+package = false

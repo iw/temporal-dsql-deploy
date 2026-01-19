@@ -1,6 +1,25 @@
 # Dynamic configuration for Aurora DSQL development environment
 
-# DSQL-specific settings
+# =============================================================================
+# Eager Execution Settings
+# =============================================================================
+
+# Enable eager activity execution - activities can be dispatched back to the
+# same worker that completed the workflow task, bypassing the server round-trip
+# Required for SDK's DisableEagerActivities=false to have effect
+# Default: false (must be explicitly enabled)
+system.enableActivityEagerExecution:
+  - value: true
+    constraints: {}
+
+# Eager workflow start is enabled by default (true)
+# Allows first workflow task to be returned inline with StartWorkflowExecution response
+
+# =============================================================================
+# DSQL-Specific Settings
+# =============================================================================
+
+# Enable DSQL mode for optimistic concurrency control handling
 persistence.enableDSQLMode:
   - value: true
     constraints: {}
@@ -22,9 +41,17 @@ system.enableLogCustomerQueryParameter:
   - value: true
     constraints: {}
 
-# DSQL optimizations - higher retry counts due to optimistic concurrency control
+# DSQL optimizations - higher QPS for 512 shards
 history.persistenceMaxQPS:
-  - value: 3000
+  - value: 6000
+    constraints: {}
+
+matching.persistenceMaxQPS:
+  - value: 6000
+    constraints: {}
+
+frontend.persistenceMaxQPS:
+  - value: 6000
     constraints: {}
 
 # DSQL connection settings
@@ -48,11 +75,24 @@ history.maxBufferedQueryCount:
 
 # Task processing settings optimized for DSQL
 matching.numTaskqueueReadPartitions:
-  - value: 4
+  - value: 8
     constraints: {}
 
 matching.numTaskqueueWritePartitions:
-  - value: 4
+  - value: 8
+    constraints: {}
+
+# Matching service throughput settings
+matching.maxTaskBatchSize:
+  - value: 100
+    constraints: {}
+
+matching.getTasksBatchSize:
+  - value: 1000
+    constraints: {}
+
+matching.longPollExpirationInterval:
+  - value: 60s
     constraints: {}
 
 # History service settings
