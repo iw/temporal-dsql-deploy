@@ -1,0 +1,32 @@
+# Grafana datasource provisioning for docker-compose deployment
+# Auto-configures Prometheus (Mimir) and CloudWatch datasources
+#
+# Environment variables substituted by entrypoint.sh:
+# - PROMETHEUS_URL: Prometheus/Mimir query endpoint (default: http://mimir:9009/prometheus)
+# - AWS_REGION: AWS region for CloudWatch (optional)
+
+apiVersion: 1
+
+datasources:
+  # Prometheus datasource (Mimir in docker-compose)
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: ${PROMETHEUS_URL}
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      manageAlerts: true
+
+  # CloudWatch datasource for Aurora DSQL metrics (optional)
+  # Requires AWS credentials configured in the container
+  - name: CloudWatch
+    type: cloudwatch
+    uid: cloudwatch
+    access: proxy
+    editable: true
+    jsonData:
+      authType: default
+      defaultRegion: ${AWS_REGION}

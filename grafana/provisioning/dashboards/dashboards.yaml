@@ -1,0 +1,27 @@
+# Grafana dashboard provisioning for docker-compose deployment
+# Auto-loads dashboards from the provisioned paths
+
+apiVersion: 1
+
+providers:
+  - name: 'Temporal Server'
+    orgId: 1
+    folder: 'Temporal'
+    folderUid: 'temporal'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/server
+
+  - name: 'DSQL Persistence'
+    orgId: 1
+    folder: 'DSQL'
+    folderUid: 'dsql'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/dsql
