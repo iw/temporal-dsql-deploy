@@ -311,4 +311,4 @@ This project was developed with significant assistance from [Kiro](https://kiro.
 
 ## License
 
-Apache 2.0
+MIT License - see [LICENSE](LICENSE) for details.
