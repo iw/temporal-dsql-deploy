@@ -75,20 +75,20 @@
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 10 },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
-          "decimals": 4,
+          "unit": "ms",
+          "decimals": 2,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.001 },
-              { "color": "red", "value": 0.01 }
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
             ]
           }
         }
       },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
-      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_reservoir_checkout_latency_seconds_bucket[1m])))" }]
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))" }]
     },
     {
       "id": 5,
@@ -170,11 +170,11 @@
       "description": "Should remain flat as load increases. If it rises, reservoir path is contended or blocking.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 12, "x": 12, "y": 14 },
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "showPoints": "never" } } },
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "showPoints": "never" } } },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(dsql_reservoir_checkout_latency_seconds_bucket[1m])))", "legendFormat": "p50" },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_reservoir_checkout_latency_seconds_bucket[1m])))", "legendFormat": "p95" },
-        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(dsql_reservoir_checkout_latency_seconds_bucket[1m])))", "legendFormat": "p99" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))", "legendFormat": "p99" }
       ]
     },
     {
@@ -228,9 +228,9 @@
       "title": "Latency by Operation (p95)",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "showPoints": "never" } } },
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "showPoints": "never" } } },
       "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] } },
-      "targets": [{ "refId": "A", "expr": "topk(8, histogram_quantile(0.95, sum by (operation, le) (rate(persistence_latency_seconds_bucket[5m]))))", "legendFormat": "{{operation}}" }]
+      "targets": [{ "refId": "A", "expr": "topk(8, histogram_quantile(0.95, sum by (operation, le) (rate(persistence_latency_milliseconds_bucket[5m]))))", "legendFormat": "{{operation}}" }]
     },
     {
       "id": 22,
