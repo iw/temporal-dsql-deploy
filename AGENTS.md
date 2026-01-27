@@ -1,7 +1,7 @@
 # TEMPORAL DSQL DEPLOYMENT GUIDE
 
 ## Mission
-Deploy and operate Temporal with **Aurora DSQL** as the persistence layer and **Elasticsearch** as the visibility store. This repository provides a complete, production-ready solution for running Temporal with DSQL's serverless PostgreSQL-compatible database.
+Local development environment for **Temporal with Aurora DSQL** persistence and **Elasticsearch** visibility. This repository aids development and testing of the DSQL plugin - it is **not** a production deployment solution. For production, see `temporal-dsql-deploy-ecs`.
 
 ## Architecture Overview
 
