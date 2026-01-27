@@ -358,6 +358,19 @@ Access Grafana at http://localhost:3000 (admin/admin) to monitor:
 - **Error Handling**: Robust retry logic for DSQL serialization conflicts
 - **Monitoring**: Service health checks and connectivity validation
 
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| `build-temporal-dsql.sh` | Build Docker image from temporal-dsql repo |
+| `deploy.sh` | Deploy DSQL infrastructure via Terraform |
+| `setup-schema.sh` | Initialize DSQL database schema |
+| `setup-elasticsearch.sh` | Create Elasticsearch visibility index |
+| `setup-rate-limiter-table.sh` | Create DynamoDB table for distributed rate limiting |
+| `setup-conn-lease-table.sh` | Create DynamoDB table for distributed connection leasing |
+| `test.sh` | Run integration tests |
+| `cleanup.sh` | Stop services and optionally destroy infrastructure |
+
 ## Related Documentation
 
 - `temporal-dsql/docs/dsql/reservoir-design.md` - Comprehensive reservoir architecture
