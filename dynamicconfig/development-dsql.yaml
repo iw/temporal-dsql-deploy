@@ -55,12 +55,14 @@ frontend.persistenceMaxQPS:
     constraints: {}
 
 # DSQL connection settings
+# CRITICAL: MaxIdleConns MUST equal MaxConns to prevent pool decay
+# MaxConnIdleTime is set to 0 in code to prevent idle connection closure
 persistence.maxConns:
-  - value: 20
+  - value: 50
     constraints: {}
 
 persistence.maxIdleConns:
-  - value: 20
+  - value: 50
     constraints: {}
 
 # DSQL transaction retry settings (due to optimistic concurrency control)

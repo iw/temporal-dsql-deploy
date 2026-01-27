@@ -6,18 +6,13 @@ set -euo pipefail
 
 TEMPORAL_DSQL_PATH="${1:-../temporal-dsql}"
 
-# Auto-detect architecture if not provided
+# HARDCODED: Always use arm64 for local development (Apple Silicon)
+# This eliminates constant architecture mismatch issues during development
+TARGET_ARCH="arm64"
+
+# Allow override via second argument if explicitly provided
 if [ -n "${2:-}" ]; then
     TARGET_ARCH="$2"
-else
-    # Auto-detect architecture
-    DETECTED_ARCH=$(uname -m)
-    case "$DETECTED_ARCH" in
-        x86_64) TARGET_ARCH="amd64" ;;
-        aarch64|arm64) TARGET_ARCH="arm64" ;;
-        armv7l) TARGET_ARCH="arm" ;;
-        *) TARGET_ARCH="arm64"; echo "WARNING: Unknown architecture $DETECTED_ARCH, defaulting to arm64" ;;
-    esac
 fi
 
 # Normalize architecture names to match Docker/Go conventions

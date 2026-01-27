@@ -56,7 +56,7 @@ Deploy and operate Temporal with **Aurora DSQL** as the persistence layer and **
 3. **Temporal Services**: Core workflow orchestration
    - Frontend, History, Matching, and Worker services
    - Custom DSQL plugin with retry logic for serialization conflicts
-   - Optimized connection pooling for serverless architecture
+   - Connection Reservoir for rate-limit-aware connection management
 
 ## Quick Start
 
@@ -91,110 +91,82 @@ open http://localhost:8080
 ./scripts/cleanup.sh
 ```
 
-### Verification
+## Connection Reservoir (Recommended)
+
+The DSQL plugin includes a **Connection Reservoir** - a channel-based buffer of pre-created connections that eliminates rate limit pressure in the request path.
+
+### Why Reservoir Mode?
+
+DSQL has a **cluster-wide connection rate limit of 100 connections/second**. Traditional connection pools create connections on-demand, which competes for this budget under load. The reservoir solves this by:
+
+1. **Pre-creating connections** in a background goroutine (the "refiller")
+2. **Storing them in a channel buffer** for instant checkout
+3. **Proactively evicting** connections before they expire
+4. **Never blocking** on rate limiters in the request path
+
+### Configuration
 
 ```bash
-# Check service health
-docker compose ps
-
-# View logs
-docker compose logs -f temporal-frontend
-
-# Test with Python sample
-cd dsql-tests
-uv run dsql_hello_activity.py
-
-# Monitor Elasticsearch
-curl http://localhost:9200/_cat/health?v
+# Enable reservoir mode (recommended for production)
+DSQL_RESERVOIR_ENABLED=true
+DSQL_RESERVOIR_TARGET_READY=50      # Connections to maintain
+DSQL_RESERVOIR_BASE_LIFETIME=11m    # Connection lifetime
+DSQL_RESERVOIR_LIFETIME_JITTER=2m   # Random jitter (9-13m effective)
+DSQL_RESERVOIR_GUARD_WINDOW=45s     # Discard if too close to expiry
 ```
 
-## Detailed Setup Process
+### How It Works
 
-### Step 1: Build Docker Images
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    CONNECTION RESERVOIR                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────┐     ┌─────────────────────────────────────┐   │
+│  │   Refiller  │────▶│  Channel Buffer (targetReady=50)   │   │
+│  │  (goroutine)│     │  [conn][conn][conn]...[conn]       │   │
+│  └─────────────┘     └─────────────────────────────────────┘   │
+│        │                              │                        │
+│        │ Creates connections          │ Instant checkout       │
+│        │ (rate limited)               │ (sub-millisecond)      │
+│        ▼                              ▼                        │
+│  ┌─────────────┐              ┌─────────────────┐              │
+│  │ Rate Limiter│              │  database/sql   │              │
+│  │ (100/sec)   │              │  connection pool│              │
+│  └─────────────┘              └─────────────────┘              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Expected Startup Logs
+
+```
+DSQL reservoir starting  target_ready=50 base_lifetime=11m0s jitter=2m0s guard_window=45s
+DSQL reservoir refiller started
+DSQL reservoir initial fill complete  ready=50 elapsed=5.2s
+```
+
+### Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `dsql_reservoir_size` | Current connections in reservoir |
+| `dsql_reservoir_checkouts` | Total successful checkouts |
+| `dsql_reservoir_empty_checkouts` | Checkouts when reservoir was empty |
+| `dsql_reservoir_discards` | Connections discarded (expired/guard) |
+| `dsql_reservoir_refills` | Connections added by refiller |
+
+## Distributed Connection Leasing (Optional)
+
+For multi-service deployments, enable DynamoDB-backed connection leasing to coordinate the global connection count:
 
 ```bash
-# Build for your architecture (auto-detected)
-./scripts/build-temporal-dsql.sh ../temporal-dsql
-
-# Or specify architecture explicitly
-./scripts/build-temporal-dsql.sh ../temporal-dsql arm64  # Apple Silicon
-./scripts/build-temporal-dsql.sh ../temporal-dsql amd64  # Intel/AMD
+DSQL_DISTRIBUTED_CONN_LEASE_ENABLED=true
+DSQL_DISTRIBUTED_CONN_LEASE_TABLE=temporal-dsql-conn-lease
+DSQL_DISTRIBUTED_CONN_LIMIT=10000
 ```
 
-**Output Images:**
-- `temporal-dsql:latest` - Base image from temporal-dsql repository
-- `temporal-dsql-runtime:test` - Deployment runtime with DSQL configuration
-
-### Step 2: Deploy Infrastructure
-
-```bash
-# Set project name (important for cleanup)
-export PROJECT_NAME="my-temporal-test"
-
-# Deploy DSQL cluster and generate environment
-./scripts/deploy.sh
-```
-
-**What this creates:**
-- Aurora DSQL cluster with public endpoint
-- IAM authentication configuration
-- Environment file (`.env`) with connection details
-- Terraform state for infrastructure management
-
-### Step 3: Setup Database Schema
-
-```bash
-# Initialize DSQL schema using temporal-dsql-tool
-./scripts/setup-schema.sh
-```
-
-**Schema setup process:**
-1. Uses `temporal-dsql-tool` with embedded DSQL schema
-2. Creates all required Temporal tables
-3. Sets up schema versioning for future migrations
-4. Validates table creation
-
-### Step 4: Start Services
-
-```bash
-# Start all services with proper dependency order
-docker compose up -d
-
-# Check service health
-docker compose ps
-```
-
-**Service startup order:**
-1. Elasticsearch (with health check)
-2. History service (depends on Elasticsearch)
-3. Matching service (depends on History)
-4. Frontend service (depends on Matching)
-5. Worker service (depends on Frontend)
-6. Temporal UI (depends on Frontend)
-
-### Step 5: Setup Elasticsearch Index
-
-```bash
-# Create visibility index with proper field mappings
-./scripts/setup-elasticsearch.sh
-```
-
-**Elasticsearch setup:**
-- Uses `temporal-elasticsearch-tool` (preferred) or curl fallback
-- Creates proper field mappings for UI compatibility
-- Validates search functionality
-- Provides health check information
-
-### Step 6: Test Integration
-
-```bash
-# Run comprehensive integration tests
-./scripts/test.sh
-
-# Or test manually with Python samples
-cd dsql-tests
-uv run dsql_hello_activity.py
-```
+This ensures the cluster doesn't exceed DSQL's 10,000 max connections limit.
 
 ## Configuration Details
 
@@ -216,11 +188,17 @@ TEMPORAL_ELASTICSEARCH_PORT=9200
 TEMPORAL_ELASTICSEARCH_SCHEME=http
 TEMPORAL_ELASTICSEARCH_INDEX=temporal_visibility_v1_dev
 
-# Connection Pool Settings (optimized for DSQL)
-TEMPORAL_SQL_MAX_CONNS=20
-TEMPORAL_SQL_MAX_IDLE_CONNS=5
+# Connection Pool Settings
+TEMPORAL_SQL_MAX_CONNS=50
+TEMPORAL_SQL_MAX_IDLE_CONNS=50
 TEMPORAL_SQL_CONNECTION_TIMEOUT=30s
-TEMPORAL_SQL_MAX_CONN_LIFETIME=300s
+
+# Reservoir Configuration (recommended)
+DSQL_RESERVOIR_ENABLED=true
+DSQL_RESERVOIR_TARGET_READY=50
+DSQL_RESERVOIR_BASE_LIFETIME=11m
+DSQL_RESERVOIR_LIFETIME_JITTER=2m
+DSQL_RESERVOIR_GUARD_WINDOW=45s
 ```
 
 ### Docker Compose Services
@@ -237,12 +215,6 @@ services:
   alloy:              # Metrics collection (scrapes Temporal services)
   grafana:            # Dashboards and visualization
 ```
-
-### Persistence Configuration
-
-The system uses a dual-store approach:
-- **DSQL**: All workflow state, executions, activities, timers
-- **Elasticsearch**: Workflow metadata for search and UI queries
 
 ## Operational Procedures
 
@@ -294,6 +266,10 @@ aws dsql list-clusters --region eu-west-1
    - **Cause**: Elasticsearch field mapping issues
    - **Solution**: Recreate index using `./scripts/setup-elasticsearch.sh`
 
+5. **Reservoir empty checkouts**
+   - **Cause**: Rate limiter too slow or high connection churn
+   - **Solution**: Check `dsql_reservoir_empty_checkouts` metric, increase target_ready
+
 ### Cleanup
 
 ```bash
@@ -315,7 +291,7 @@ aws dsql list-clusters --region eu-west-1
 ./scripts/build-temporal-dsql.sh ../temporal-dsql
 
 # Restart services
-docker compose restart
+docker compose down && docker compose up -d
 
 # Test changes
 ./scripts/test.sh
@@ -330,83 +306,12 @@ docker compose restart
 docker compose restart temporal-history
 ```
 
-### Configuration Changes
-```bash
-# Edit .env or docker-compose.yml
-vim .env
+## Schema Setup
 
-# Restart affected services
-docker compose restart
-```
-
-## Production Considerations
-
-### Security
-- **Use AWS Secrets Manager** for database credentials
-- **Configure IAM roles** for DSQL authentication
-- **Enable VPC endpoints** for private connectivity
-- **Implement least-privilege access** policies
-
-### Monitoring
-- **DSQL Metrics**: Connection pool utilization, query latency, conflict rates
-- **Elasticsearch Health**: Cluster status, index size, query performance
-- **Temporal Metrics**: Workflow throughput, task queue depth, service health
-
-### Scaling
-- **DSQL**: Automatically scales with demand (serverless)
-- **Elasticsearch**: Consider cluster deployment for production
-- **Temporal Services**: Scale horizontally by adding more containers
-
-### Backup & Recovery
-- **DSQL**: Automatic backups and point-in-time recovery
-- **Elasticsearch**: Regular index snapshots
-- **Configuration**: Version control all configuration files
-
-## Architecture Benefits
-
-### Cost Optimization
-- **DSQL**: Pay only for actual usage (serverless)
-- **Local Elasticsearch**: No AWS OpenSearch costs during development
-- **Simplified Infrastructure**: Minimal AWS resources required
-
-### Operational Simplicity
-- **No VPN Setup**: Direct public endpoint access to DSQL
-- **Local Development**: Full control over Elasticsearch
-- **Fast Iteration**: Quick setup and teardown cycles
-
-### Production Ready
-- **DSQL Optimizations**: Custom retry logic for optimistic concurrency
-- **Proper Field Mappings**: UI compatibility with correct Elasticsearch schema
-- **Health Checks**: Comprehensive service monitoring and dependency management
-- **IAM Authentication**: Secure, credential-free database access
-
-## Implementation Status
-
-### ✅ Completed Features
-- **DSQL Integration**: Full persistence layer with optimistic concurrency control
-- **Elasticsearch Integration**: Local visibility store with proper field mappings
-- **Docker Orchestration**: Complete service dependency management
-- **Schema Management**: Automated setup using temporal-sql-tool
-- **Testing Framework**: Comprehensive integration testing
-- **Documentation**: Complete setup and operational guides
-- **Observability Stack**: Grafana + Alloy + Mimir for metrics and dashboards
-
-### 🚀 Production Ready
-- **Core Functionality**: All Temporal features working with DSQL + Elasticsearch
-- **UI Integration**: Workflows visible and searchable in Temporal UI
-- **Test Applications**: Python test samples in `dsql-tests/` directory
-- **Error Handling**: Robust retry logic for DSQL serialization conflicts
-- **Monitoring**: Service health checks and connectivity validation
-
-This architecture provides a robust, cost-effective solution for running Temporal with Aurora DSQL persistence and Elasticsearch visibility, suitable for both development and production environments.
-
-## Critical Schema Setup Commands
-
-**IMPORTANT**: Use `temporal-dsql-tool` for DSQL schema setup. This is the canonical command:
+**IMPORTANT**: Use `temporal-dsql-tool` for DSQL schema setup:
 
 ```bash
 # Setup schema using embedded DSQL schema (recommended)
-# Note: --version is required to create schema_version table needed by Temporal server
 ./temporal-dsql-tool \
     --endpoint "$CLUSTER_ENDPOINT" \
     --region "$AWS_REGION" \
@@ -417,7 +322,6 @@ This architecture provides a robust, cost-effective solution for running Tempora
 
 **For complete reset (with overwrite):**
 ```bash
-# Drop existing tables and recreate schema
 ./temporal-dsql-tool \
     --endpoint "$CLUSTER_ENDPOINT" \
     --region "$AWS_REGION" \
@@ -427,5 +331,35 @@ This architecture provides a robust, cost-effective solution for running Tempora
     --overwrite
 ```
 
-**Note**: `temporal-dsql-tool` uses IAM authentication automatically and has the DSQL schema embedded.
-**Important**: Do NOT use `--disable-versioning` as Temporal server requires the `schema_version` table at startup.
+## Grafana Dashboard
+
+Access Grafana at http://localhost:3000 (admin/admin) to monitor:
+
+- `dsql_reservoir_size` - Should stay at target_ready
+- `dsql_reservoir_checkouts` - Successful connection checkouts
+- `dsql_reservoir_empty_checkouts` - Should be 0 if reservoir is healthy
+- `dsql_pool_in_use` - Connections actively in use
+- `dsql_tx_conflict_total` - OCC conflicts (expected under load)
+
+## Implementation Status
+
+### ✅ Completed Features
+- **DSQL Integration**: Full persistence layer with optimistic concurrency control
+- **Connection Reservoir**: Rate-limit-aware connection management
+- **Distributed Connection Leasing**: DynamoDB-backed global connection coordination
+- **Elasticsearch Integration**: Local visibility store with proper field mappings
+- **Docker Orchestration**: Complete service dependency management
+- **Schema Management**: Automated setup using temporal-dsql-tool
+- **Observability Stack**: Grafana + Alloy + Mimir for metrics and dashboards
+
+### 🚀 Production Ready
+- **Core Functionality**: All Temporal features working with DSQL + Elasticsearch
+- **UI Integration**: Workflows visible and searchable in Temporal UI
+- **Error Handling**: Robust retry logic for DSQL serialization conflicts
+- **Monitoring**: Service health checks and connectivity validation
+
+## Related Documentation
+
+- `temporal-dsql/docs/dsql/reservoir-design.md` - Comprehensive reservoir architecture
+- `temporal-dsql/docs/dsql/implementation.md` - DSQL plugin implementation details
+- `temporal-dsql/docs/dsql/metrics.md` - Metrics reference
