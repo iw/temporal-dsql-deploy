@@ -97,7 +97,7 @@ The DSQL plugin includes a **Connection Reservoir** - a channel-based buffer of 
 
 ### Why Reservoir Mode?
 
-DSQL has a **cluster-wide connection rate limit of 100 connections/second**. Traditional connection pools create connections on-demand, which competes for this budget under load. The reservoir solves this by:
+DSQL has a **cluster-wide connection rate limit of 100 connections/second** with a **burst capacity of 1,000 connections**. Traditional connection pools create connections on-demand, which competes for this budget under load. The reservoir solves this by:
 
 1. **Pre-creating connections** in a background goroutine (the "refiller")
 2. **Storing them in a channel buffer** for instant checkout
@@ -113,6 +113,7 @@ DSQL_RESERVOIR_TARGET_READY=50      # Connections to maintain
 DSQL_RESERVOIR_BASE_LIFETIME=11m    # Connection lifetime
 DSQL_RESERVOIR_LIFETIME_JITTER=2m   # Random jitter (9-13m effective)
 DSQL_RESERVOIR_GUARD_WINDOW=45s     # Discard if too close to expiry
+DSQL_RESERVOIR_INFLIGHT_LIMIT=8     # Max concurrent Open() calls
 ```
 
 ### How It Works
@@ -155,18 +156,42 @@ DSQL reservoir initial fill complete  ready=50 elapsed=5.2s
 | `dsql_reservoir_empty_checkouts` | Checkouts when reservoir was empty |
 | `dsql_reservoir_discards` | Connections discarded (expired/guard) |
 | `dsql_reservoir_refills` | Connections added by refiller |
+| `dsql_refiller_inflight` | Current concurrent Open() calls |
 
-## Distributed Connection Leasing (Optional)
+## Distributed Rate Limiting (Token Bucket)
+
+For multi-service deployments, enable DynamoDB-backed token bucket rate limiting to coordinate the cluster-wide 100 conn/sec limit:
+
+```bash
+DSQL_DISTRIBUTED_RATE_LIMITER_ENABLED=true
+DSQL_DISTRIBUTED_RATE_LIMITER_TABLE=temporal-dsql-rate-limiter
+DSQL_TOKEN_BUCKET_ENABLED=true
+DSQL_TOKEN_BUCKET_RATE=100       # Tokens per second (DSQL sustained rate)
+DSQL_TOKEN_BUCKET_CAPACITY=1000  # Bucket capacity (DSQL burst capacity)
+```
+
+The token bucket takes advantage of DSQL's burst capacity (1,000 connections) for fast initial fill, then settles to 100/sec sustained rate.
+
+## Distributed Connection Leasing (Slot Blocks)
 
 For multi-service deployments, enable DynamoDB-backed connection leasing to coordinate the global connection count:
 
 ```bash
 DSQL_DISTRIBUTED_CONN_LEASE_ENABLED=true
 DSQL_DISTRIBUTED_CONN_LEASE_TABLE=temporal-dsql-conn-lease
-DSQL_DISTRIBUTED_CONN_LIMIT=10000
+DSQL_SLOT_BLOCK_SIZE=100   # Slots per block
+DSQL_SLOT_BLOCK_COUNT=100  # Total blocks (100 × 100 = 10k slots)
+DSQL_SLOT_BLOCK_TTL=3m     # TTL for crash recovery
 ```
 
-This ensures the cluster doesn't exceed DSQL's 10,000 max connections limit.
+Uses a block-based allocation strategy to avoid hot partition issues in DynamoDB. Each service acquires blocks of connection slots at startup, then tracks usage locally without DynamoDB calls.
+
+### Slot Block Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `dsql_slot_blocks_owned` | Number of slot blocks owned by this service |
+| `dsql_slot_blocks_slots_used` | Number of slots currently in use |
 
 ## Configuration Details
 
@@ -199,6 +224,21 @@ DSQL_RESERVOIR_TARGET_READY=50
 DSQL_RESERVOIR_BASE_LIFETIME=11m
 DSQL_RESERVOIR_LIFETIME_JITTER=2m
 DSQL_RESERVOIR_GUARD_WINDOW=45s
+DSQL_RESERVOIR_INFLIGHT_LIMIT=8
+
+# Token Bucket Rate Limiting (recommended)
+DSQL_DISTRIBUTED_RATE_LIMITER_ENABLED=true
+DSQL_DISTRIBUTED_RATE_LIMITER_TABLE=temporal-dsql-rate-limiter
+DSQL_TOKEN_BUCKET_ENABLED=true
+DSQL_TOKEN_BUCKET_RATE=100
+DSQL_TOKEN_BUCKET_CAPACITY=1000
+
+# Slot Block Connection Limiting (recommended for multi-service)
+DSQL_DISTRIBUTED_CONN_LEASE_ENABLED=true
+DSQL_DISTRIBUTED_CONN_LEASE_TABLE=temporal-dsql-conn-lease
+DSQL_SLOT_BLOCK_SIZE=100
+DSQL_SLOT_BLOCK_COUNT=100
+DSQL_SLOT_BLOCK_TTL=3m
 ```
 
 ### Docker Compose Services
@@ -338,6 +378,9 @@ Access Grafana at http://localhost:3000 (admin/admin) to monitor:
 - `dsql_reservoir_size` - Should stay at target_ready
 - `dsql_reservoir_checkouts` - Successful connection checkouts
 - `dsql_reservoir_empty_checkouts` - Should be 0 if reservoir is healthy
+- `dsql_refiller_inflight` - Concurrent Open() calls (should be ≤ 8)
+- `dsql_slot_blocks_owned` - Slot blocks owned by this service
+- `dsql_slot_blocks_slots_used` - Slots currently in use
 - `dsql_pool_in_use` - Connections actively in use
 - `dsql_tx_conflict_total` - OCC conflicts (expected under load)
 

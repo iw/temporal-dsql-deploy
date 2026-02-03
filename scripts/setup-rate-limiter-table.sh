@@ -4,6 +4,21 @@
 # This table coordinates connection rate limiting across all Temporal service
 # instances to respect DSQL's cluster-wide 100 connections/sec limit.
 #
+# Supports two rate limiting modes:
+#
+# 1. Token Bucket (recommended) - Takes advantage of DSQL's burst capacity
+#    Schema: pk=dsql_connect_bucket#<endpoint>
+#      - tokens_milli (Number): Current tokens × 1000 (milli-tokens)
+#      - last_refill_ms (Number): Last refill timestamp (Unix millis)
+#      - rate_milli (Number): Refill rate × 1000 (default: 100_000)
+#      - capacity_milli (Number): Max tokens × 1000 (default: 1_000_000)
+#      - ttl_epoch (Number): TTL for cleanup if endpoint unused
+#
+# 2. Per-Second Counter (legacy) - Simple counter per second
+#    Schema: pk=dsqlconnect#<endpoint>#<unix_second>
+#      - count (Number): Connections created this second
+#      - ttl_epoch (Number): TTL for automatic cleanup
+#
 # Usage:
 #   ./scripts/setup-rate-limiter-table.sh [table-name] [region]
 #
@@ -28,7 +43,9 @@ fi
 
 # Create table with on-demand billing (pay-per-request)
 # Schema:
-#   pk (String) - Partition key: "dsqlconnect#<endpoint>#<unix_second>"
+#   pk (String) - Partition key
+#     Token bucket: "dsql_connect_bucket#<endpoint>"
+#     Per-second counter: "dsqlconnect#<endpoint>#<unix_second>"
 #   ttl_epoch (Number) - TTL attribute for automatic cleanup
 aws dynamodb create-table \
     --table-name "$TABLE_NAME" \
@@ -55,7 +72,14 @@ aws dynamodb update-time-to-live \
 echo ""
 echo "✅ DynamoDB table '$TABLE_NAME' created successfully"
 echo ""
-echo "To enable distributed rate limiting, add to your .env:"
+echo "To enable distributed rate limiting with token bucket (recommended), add to your .env:"
+echo "  DSQL_DISTRIBUTED_RATE_LIMITER_ENABLED=true"
+echo "  DSQL_DISTRIBUTED_RATE_LIMITER_TABLE=$TABLE_NAME"
+echo "  DSQL_TOKEN_BUCKET_ENABLED=true"
+echo "  DSQL_TOKEN_BUCKET_RATE=100"
+echo "  DSQL_TOKEN_BUCKET_CAPACITY=1000"
+echo ""
+echo "For legacy per-second counter mode:"
 echo "  DSQL_DISTRIBUTED_RATE_LIMITER_ENABLED=true"
 echo "  DSQL_DISTRIBUTED_RATE_LIMITER_TABLE=$TABLE_NAME"
 echo "  DSQL_DISTRIBUTED_RATE_LIMITER_LIMIT=100"
