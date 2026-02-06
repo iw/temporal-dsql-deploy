@@ -88,7 +88,7 @@
         }
       },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
-      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))" }]
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_reservoir_checkout_latency_bucket[1m]))) * 1000" }]
     },
     {
       "id": 5,
@@ -172,9 +172,9 @@
       "gridPos": { "h": 6, "w": 12, "x": 12, "y": 14 },
       "fieldConfig": { "defaults": { "unit": "ms", "custom": { "showPoints": "never" } } },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))", "legendFormat": "p50" },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))", "legendFormat": "p95" },
-        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))", "legendFormat": "p99" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(dsql_reservoir_checkout_latency_bucket[1m]))) * 1000", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_reservoir_checkout_latency_bucket[1m]))) * 1000", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(dsql_reservoir_checkout_latency_bucket[1m]))) * 1000", "legendFormat": "p99" }
       ]
     },
     {
