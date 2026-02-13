@@ -16,7 +16,7 @@ ENV TEMPORAL_SQL_DATABASE=${DSQL_DATABASE}
 ENV TEMPORAL_SQL_PLUGIN_NAME=${SQL_PLUGIN_NAME}
 ENV TEMPORAL_SQL_PASSWORD_FILE=/run/secrets/dsql-password
 ENV TEMPORAL_SQL_MAX_CONNS=50
-ENV TEMPORAL_SQL_MAX_IDLE_CONNS=10
+ENV TEMPORAL_SQL_MAX_IDLE_CONNS=50
 ENV TEMPORAL_SQL_TLS_ENABLED=true
 ENV TEMPORAL_SQL_CA_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV TEMPORAL_SQL_SERVER_NAME=
@@ -51,7 +51,6 @@ RUN python3 --version || (echo "ERROR: Base image missing python3" && exit 1)
 # Copy persistence templates - elasticsearch template is the primary one used by docker-compose
 COPY docker/config/persistence-dsql-elasticsearch.template.yaml /etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
 COPY docker/config/persistence-dsql.template.yaml /etc/temporal/config/persistence-dsql.template.yaml
-COPY docker/config/dynamicconfig.yaml /etc/temporal/config/dynamicconfig.yaml
 COPY docker/render-and-start.sh /usr/local/bin/render-and-start.sh
 
 ENTRYPOINT ["/usr/local/bin/render-and-start.sh"]

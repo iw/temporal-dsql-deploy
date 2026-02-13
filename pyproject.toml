@@ -1,17 +1,40 @@
 [project]
 name = "temporal-dsql-deploy"
 version = "0.1.0"
-description = "Provision Aurora DSQL resources and configure Temporal for external OpenSearch"
+description = "Local development environment for Temporal with Aurora DSQL persistence"
 readme = "README.md"
 authors = [
     { name = "Ian Wilkinson", email = "ianw1@me.com" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 dependencies = [
-    "boto3>=1.42.3,<2",
-    "temporalio>=1.21.1",
+    "boto3==1.42.44",
+    "dagger-io==0.19.11",
+    "psycopg[binary]>=3.2",
+    "temporalio==1.22.0",
+    "typer>=0.15",
+    "rich>=13.9",
 ]
 
+[project.scripts]
+tdeploy = "tdeploy.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [tool.uv]
-# No package to build - this is a scripts-only project
-package = false
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tdeploy"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"

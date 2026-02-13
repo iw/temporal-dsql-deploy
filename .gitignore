@@ -20,14 +20,16 @@ server.chain.crt
 
 # Environment and secrets
 .env
+**/.env
 secrets/
 terraform-outputs.json
 
-# Terraform state and plans
-terraform/*.tfstate*
-terraform/.terraform/
-terraform/.terraform.lock.hcl
-terraform/tfplan
+# Terraform state, plans, and variable files (all modules)
+terraform/**/*.tfstate*
+terraform/**/.terraform/
+terraform/**/.terraform.lock.hcl
+terraform/**/tfplan
+terraform/**/*.tfvars
 *.tfplan
 
 # Virtual environments

@@ -1,248 +1,245 @@
-# TEMPORAL DSQL DEPLOYMENT GUIDE
+# temporal-dsql-deploy
 
 ## Mission
-Local development environment for **Temporal with Aurora DSQL** persistence and **Elasticsearch** visibility. This repository aids development and testing of the DSQL plugin - it is **not** a production deployment solution. For production, see `temporal-dsql-deploy-ecs`.
 
-## Architecture Overview
+Local development environment for two interrelated projects:
+
+1. **DSQL persistence plugin** — The [temporal-dsql](https://github.com/iw/temporal) fork adds Aurora DSQL as a first-class persistence backend for Temporal. This repo provides the Docker Compose stack to build, run, and observe Temporal against a real DSQL cluster with full observability.
+
+2. **Temporal SRE Copilot** — The [temporal-sre-copilot](https://github.com/iw/temporal-sre-copilot) is an AI-powered observability agent that monitors a Temporal+DSQL deployment, derives health state from forward progress signals, and uses LLMs to explain what's happening. This repo provides the monitored cluster, observability stack (Mimir + Loki), and a second Temporal cluster for the Copilot's own Pydantic AI workflows.
+
+Both use cases share the same foundation: Temporal services against Aurora DSQL, Elasticsearch for visibility, and Grafana for dashboards. The Copilot profile extends this with Loki, a second Temporal cluster, and Amazon Bedrock integration.
+
+This is **not** a production deployment solution. For production, see `temporal-dsql-deploy-ecs`.
+
+## Architecture
+
+### DSQL Profile — Plugin development
+
+Four Temporal services against a DSQL cluster, with Elasticsearch for visibility and Alloy → Mimir → Grafana for metrics.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    TEMPORAL DSQL ARCHITECTURE                   │
-├─────────────────────────────────────────────────────────────────┤
+│                    LOCAL DEVELOPMENT (Docker)                   │
 │                                                                 │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────┐  │
-│  │   Temporal UI   │    │ Temporal Client │    │   Python    │  │
-│  │  localhost:8080 │    │   Applications  │    │   Samples   │  │
-│  └─────────────────┘    └─────────────────┘    └─────────────┘  │
-│           │                       │                     │       │
-│           └───────────────────────┼─────────────────────┘       │
-│                                   │                             │
-│  ┌─────────────────────────────────▼─────────────────────────────┐  │
-│  │              TEMPORAL SERVICES (Docker)                     │  │
-│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌────────┐ │  │
-│  │  │  Frontend   │ │   History   │ │  Matching   │ │ Worker │ │  │
-│  │  │   :7233     │ │    :7234    │ │    :7235    │ │  :7239 │ │  │
-│  │  └─────────────┘ └─────────────┘ └─────────────┘ └────────┘ │  │
-│  └─────────────────────────────────┬─────────────────────────────┘  │
-│                                    │                                │
-│         ┌──────────────────────────┼──────────────────────────┐     │
-│         │                          │                          │     │
-│         ▼                          ▼                          │     │
-│  ┌─────────────────┐    ┌─────────────────────────────────────▼──┐  │
-│  │  ELASTICSEARCH  │    │           AURORA DSQL                 │  │
-│  │   (Visibility)  │    │         (Persistence)                │  │
-│  │                 │    │                                      │  │
-│  │ • Local Docker  │    │ • AWS Managed Service               │  │
-│  │ • Port 9200     │    │ • Public Endpoint + IAM Auth        │  │
-│  │ • Search/Filter │    │ • Serverless PostgreSQL-compatible │  │
-│  │ • UI Queries    │    │ • Workflow State Storage            │  │
-│  └─────────────────┘    └──────────────────────────────────────┘  │
+│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐      │
+│  │ Frontend  │ │  History  │ │ Matching  │ │  Worker   │      │
+│  │  :7233    │ │   :7234   │ │   :7235   │ │   :7239   │      │
+│  └─────┬─────┘ └─────┬─────┘ └─────┬─────┘ └─────┬─────┘      │
+│        └──────────────┼─────────────┼─────────────┘            │
+│                       │             │                          │
+│  ┌─────────────┐  ┌───▼─────────────▼───┐  ┌───────────────┐  │
+│  │Elasticsearch│  │   Alloy → Mimir →   │  │   CloudWatch  │  │
+│  │ (Visibility)│  │      Grafana        │  │  (DSQL metrics)│  │
+│  │   :9200     │  │      :3000          │  │               │  │
+│  └─────────────┘  └─────────────────────┘  └───────────────┘  │
 │                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                   ┌────────▼────────┐
+                   │   AURORA DSQL   │
+                   │  (Persistence)  │
+                   │  IAM Auth       │
+                   └─────────────────┘
 ```
 
-### Key Components
+### Copilot Profile — SRE Copilot development
 
-1. **Aurora DSQL (AWS)**: Serverless PostgreSQL-compatible persistence layer
-   - Stores workflow executions, activities, timers, and all Temporal state
-   - Uses IAM authentication and public endpoint access
-   - Optimized for DSQL's optimistic concurrency control model
+Everything in the DSQL profile, plus Loki for log collection, a second Temporal cluster for the Copilot's own Pydantic AI workflows, and Bedrock integration for AI-powered health assessments.
 
-2. **Elasticsearch (Local)**: Visibility and search functionality
-   - Indexes workflow metadata for UI queries and advanced search
-   - Runs in Docker container for development simplicity
-   - Provides fast filtering, sorting, and aggregation capabilities
-
-3. **Temporal Services**: Core workflow orchestration
-   - Frontend, History, Matching, and Worker services
-   - Custom DSQL plugin with retry logic for serialization conflicts
-   - Connection Reservoir for rate-limit-aware connection management
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     DOCKER COMPOSE NETWORK                          │
+│                                                                     │
+│  MONITORED CLUSTER              OBSERVABILITY        COPILOT        │
+│  ┌──────────────────┐          ┌────────────┐       ┌────────────┐ │
+│  │ temporal-frontend │──┐      │ mimir      │       │ copilot-   │ │
+│  │ temporal-history  │  │      │ (metrics)  │◄──────│ temporal   │ │
+│  │ temporal-matching │  ├─────▶│            │       │            │ │
+│  │ temporal-worker   │  │      ├────────────┤       ├────────────┤ │
+│  └──────────────────┘  │      │ loki       │       │ copilot-   │ │
+│  ┌──────────────────┐  │      │ (logs)     │◄──────│ worker     │ │
+│  │ elasticsearch    │  │      ├────────────┤       │ (Pydantic  │ │
+│  │ temporal-ui      │  │      │ alloy      │       │  AI)       │ │
+│  └──────────────────┘  │      │ (collector)│       ├────────────┤ │
+│                        │      ├────────────┤       │ copilot-   │ │
+│                        └─────▶│ grafana    │◄──────│ api        │ │
+│                               │ :3000      │       │ :8081      │ │
+│                               └────────────┘       └────────────┘ │
+│                                                          │        │
+│  ┌──────────────────┐                          ┌─────────▼──────┐ │
+│  │ Aurora DSQL      │                          │ Aurora DSQL    │ │
+│  │ (monitored)      │                          │ (copilot)      │ │
+│  └──────────────────┘                          └────────────────┘ │
+│                                                          │        │
+│                                                ┌─────────▼──────┐ │
+│                                                │ Amazon Bedrock │ │
+│                                                │ (Claude, KB)   │ │
+│                                                └────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ## Quick Start
 
 ### Prerequisites
-- **Docker & Docker Compose**: Container orchestration
-- **AWS CLI**: Configured with appropriate permissions
-- **Terraform**: Infrastructure provisioning (v1.0+)
-- **temporal-dsql repository**: Built and available at `../temporal-dsql`
+- Docker & Docker Compose
+- AWS CLI configured with appropriate permissions
+- Python 3.14+ and [uv](https://docs.astral.sh/uv/)
+- [Terraform](https://www.terraform.io/downloads) >= 1.0
+- [temporal-dsql](https://github.com/iw/temporal) repository built and available at `../temporal-dsql`
 
-### Complete Setup (5 minutes)
-
-```bash
-# 1. Set project name for resource management
-export PROJECT_NAME="my-temporal-test"
-
-# 2. Build Temporal DSQL runtime image
-./scripts/build-temporal-dsql.sh ../temporal-dsql
-
-# 3. Deploy DSQL infrastructure and generate configuration
-./scripts/deploy.sh
-
-# 4. Setup database schema
-./scripts/setup-schema.sh
-
-# 5. Test complete integration
-./scripts/test.sh
-
-# 6. Access Temporal UI
-open http://localhost:8080
-
-# 7. Cleanup (when done)
-./scripts/cleanup.sh
-```
-
-## Connection Reservoir (Recommended)
-
-The DSQL plugin includes a **Connection Reservoir** - a channel-based buffer of pre-created connections that eliminates rate limit pressure in the request path.
-
-### Why Reservoir Mode?
-
-DSQL has a **cluster-wide connection rate limit of 100 connections/second** with a **burst capacity of 1,000 connections**. Traditional connection pools create connections on-demand, which competes for this budget under load. The reservoir solves this by:
-
-1. **Pre-creating connections** in a background goroutine (the "refiller")
-2. **Storing them in a channel buffer** for instant checkout
-3. **Proactively evicting** connections before they expire
-4. **Never blocking** on rate limiters in the request path
-
-### Configuration
+### Setup
 
 ```bash
-# Enable reservoir mode (recommended for production)
-DSQL_RESERVOIR_ENABLED=true
-DSQL_RESERVOIR_TARGET_READY=50      # Connections to maintain
-DSQL_RESERVOIR_BASE_LIFETIME=11m    # Connection lifetime
-DSQL_RESERVOIR_LIFETIME_JITTER=2m   # Random jitter (9-13m effective)
-DSQL_RESERVOIR_GUARD_WINDOW=45s     # Discard if too close to expiry
-DSQL_RESERVOIR_INFLIGHT_LIMIT=8     # Max concurrent Open() calls
+# 1. Install CLI
+uv sync
+
+# 2. Provision shared DSQL cluster (one-time)
+uv run tdeploy infra apply-shared --project temporal-dev
+
+# 3. Build Temporal DSQL runtime image
+uv run tdeploy build temporal ../temporal-dsql
+
+# 4. Configure environment
+cd profiles/dsql && cp .env.example .env
+# Edit .env — set TEMPORAL_SQL_HOST from terraform output
+
+# 5. Setup DSQL schema
+uv run tdeploy schema setup
+
+# 6. Start services
+uv run tdeploy services up -d
+
+# 7. Verify
+open http://localhost:8080    # Temporal UI
+open http://localhost:3000    # Grafana (admin/admin)
+
+# 8. Cleanup
+uv run tdeploy services down
 ```
 
-### How It Works
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    CONNECTION RESERVOIR                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────┐     ┌─────────────────────────────────────┐   │
-│  │   Refiller  │────▶│  Channel Buffer (targetReady=50)   │   │
-│  │  (goroutine)│     │  [conn][conn][conn]...[conn]       │   │
-│  └─────────────┘     └─────────────────────────────────────┘   │
-│        │                              │                        │
-│        │ Creates connections          │ Instant checkout       │
-│        │ (rate limited)               │ (sub-millisecond)      │
-│        ▼                              ▼                        │
-│  ┌─────────────┐              ┌─────────────────┐              │
-│  │ Rate Limiter│              │  database/sql   │              │
-│  │ (100/sec)   │              │  connection pool│              │
-│  └─────────────┘              └─────────────────┘              │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Expected Startup Logs
-
-```
-DSQL reservoir starting  target_ready=50 base_lifetime=11m0s jitter=2m0s guard_window=45s
-DSQL reservoir refiller started
-DSQL reservoir initial fill complete  ready=50 elapsed=5.2s
-```
-
-### Metrics
-
-| Metric | Description |
-|--------|-------------|
-| `dsql_reservoir_size` | Current connections in reservoir |
-| `dsql_reservoir_checkouts` | Total successful checkouts |
-| `dsql_reservoir_empty_checkouts` | Checkouts when reservoir was empty |
-| `dsql_reservoir_discards` | Connections discarded (expired/guard) |
-| `dsql_reservoir_refills` | Connections added by refiller |
-| `dsql_refiller_inflight` | Current concurrent Open() calls |
-
-## Distributed Rate Limiting (Token Bucket)
-
-For multi-service deployments, enable DynamoDB-backed token bucket rate limiting to coordinate the cluster-wide 100 conn/sec limit:
+### Copilot Setup
 
 ```bash
-DSQL_DISTRIBUTED_RATE_LIMITER_ENABLED=true
-DSQL_DISTRIBUTED_RATE_LIMITER_TABLE=temporal-dsql-rate-limiter
-DSQL_TOKEN_BUCKET_ENABLED=true
-DSQL_TOKEN_BUCKET_RATE=100       # Tokens per second (DSQL sustained rate)
-DSQL_TOKEN_BUCKET_CAPACITY=1000  # Bucket capacity (DSQL burst capacity)
+# Provision ephemeral Copilot infrastructure (DSQL cluster + Bedrock KB)
+uv run tdeploy infra apply-copilot
+
+# Build both images
+uv run tdeploy build temporal ../temporal-dsql
+uv run tdeploy build copilot ../temporal-sre-copilot
+
+# Configure and start
+cd profiles/copilot && cp .env.example .env
+# Edit .env — set both DSQL endpoints + Bedrock KB ID
+cd ../..
+uv run tdeploy schema setup --profile copilot
+uv run tdeploy schema setup-copilot
+uv run tdeploy services up -p copilot -d
+
+# When done
+uv run tdeploy services down -p copilot
+uv run tdeploy infra destroy-copilot
 ```
 
-The token bucket takes advantage of DSQL's burst capacity (1,000 connections) for fast initial fill, then settles to 100/sec sustained rate.
+## Profiles
 
-## Distributed Connection Leasing (Slot Blocks)
+| Profile | Purpose | Services | Memory |
+|---------|---------|----------|--------|
+| [dsql](profiles/dsql/) | DSQL plugin development and testing | 9 (Temporal + ES + observability) | ~3.5 GB |
+| [copilot](profiles/copilot/) | SRE Copilot development with monitored cluster | 15 (above + Loki + Copilot cluster + Bedrock) | ~5 GB |
 
-For multi-service deployments, enable DynamoDB-backed connection leasing to coordinate the global connection count:
+## Project Structure
+
+```
+temporal-dsql-deploy/
+├── src/tdeploy/               # Typer CLI (uv run tdeploy)
+│   ├── main.py                # App with subcommands
+│   ├── infra.py               # infra apply-shared / apply-copilot / destroy-copilot
+│   ├── build.py               # build temporal / copilot
+│   ├── kb.py                  # kb sync / ingest / status (Knowledge Base)
+│   ├── schema.py              # schema setup / setup-copilot
+│   └── services.py            # services up / down / ps / logs
+├── terraform/                 # Modular Terraform
+│   ├── shared/                # Long-lived: DSQL cluster + optional DynamoDB
+│   └── copilot/               # Ephemeral: Copilot DSQL cluster + Bedrock KB
+├── profiles/                  # Deployment profiles
+│   ├── dsql/                  # DSQL development profile
+│   │   ├── docker-compose.yml
+│   │   ├── .env.example
+│   │   ├── dynamicconfig/
+│   │   └── README.md
+│   └── copilot/               # SRE Copilot profile
+│       ├── docker-compose.yml
+│       ├── .env.example
+│       ├── config/            # Loki, Alloy, Grafana config
+│       ├── dynamicconfig/
+│       └── README.md
+├── docker/                    # Shared Docker configuration
+│   └── config/                # Config templates and provisioning
+├── grafana/                   # Shared Grafana dashboards
+│   ├── server/server.json     # Temporal server health
+│   ├── dsql/persistence.json  # DSQL persistence metrics
+│   └── copilot/copilot.json   # SRE Copilot health state
+├── dsql-tests/                # Python integration tests
+│   ├── temporal/              # Temporal feature validation on DSQL
+│   ├── plugin/                # DSQL plugin validation
+│   └── copilot/               # Copilot stress & integration tests
+├── Dockerfile                 # Temporal DSQL runtime image
+└── pyproject.toml             # Project config (uv)
+```
+
+## CLI Reference
+
+All commands run from the repo root with `uv run tdeploy`:
 
 ```bash
-DSQL_DISTRIBUTED_CONN_LEASE_ENABLED=true
-DSQL_DISTRIBUTED_CONN_LEASE_TABLE=temporal-dsql-conn-lease
-DSQL_SLOT_BLOCK_SIZE=100   # Slots per block
-DSQL_SLOT_BLOCK_COUNT=100  # Total blocks (100 × 100 = 10k slots)
-DSQL_SLOT_BLOCK_TTL=3m     # TTL for crash recovery
+# Infrastructure
+uv run tdeploy infra apply-shared -p temporal-dev
+uv run tdeploy infra apply-copilot
+uv run tdeploy infra destroy-copilot
+uv run tdeploy infra status
+
+# Build
+uv run tdeploy build temporal ../temporal-dsql
+uv run tdeploy build copilot ../temporal-sre-copilot
+
+# Schema
+uv run tdeploy schema setup
+uv run tdeploy schema setup --profile copilot
+uv run tdeploy schema setup-copilot
+
+# Services
+uv run tdeploy services up -d
+uv run tdeploy services up -p copilot -d
+uv run tdeploy services down
+uv run tdeploy services down -v
+uv run tdeploy services ps
+uv run tdeploy services logs -f temporal-history
+
+# Knowledge Base (copilot profile)
+uv run tdeploy kb populate
+uv run tdeploy kb sync
+uv run tdeploy kb ingest
+uv run tdeploy kb status
 ```
 
-Uses a block-based allocation strategy to avoid hot partition issues in DynamoDB. Each service acquires blocks of connection slots at startup, then tracks usage locally without DynamoDB calls.
+## Connection Reservoir
 
-### Slot Block Metrics
+DSQL has a cluster-wide connection rate limit of 100 connections/second with a burst capacity of 1,000. The reservoir pre-creates connections in a background goroutine so `driver.Open()` never blocks on rate limiting.
 
-| Metric | Description |
-|--------|-------------|
-| `dsql_slot_blocks_owned` | Number of slot blocks owned by this service |
-| `dsql_slot_blocks_slots_used` | Number of slots currently in use |
+| Setting | Default | Rationale |
+|---------|---------|-----------|
+| `DSQL_RESERVOIR_ENABLED` | `true` | Pre-create connections off the request path |
+| `DSQL_RESERVOIR_TARGET_READY` | `50` | Matches `TEMPORAL_SQL_MAX_CONNS` |
+| `DSQL_RESERVOIR_BASE_LIFETIME` | `11m` | Well under DSQL's 60-minute connection limit |
+| `DSQL_RESERVOIR_LIFETIME_JITTER` | `2m` | Prevents thundering herd (effective range: 10–12m) |
+| `DSQL_RESERVOIR_GUARD_WINDOW` | `45s` | Won't hand out connections about to expire |
 
-## Configuration Details
+Distributed rate limiting and connection leasing (DynamoDB-backed) are available for multi-instance deployments but disabled for local dev.
 
-### Environment Variables (.env)
+## Docker Compose Services
 
-```bash
-# DSQL Configuration (AWS)
-TEMPORAL_SQL_HOST=your-cluster.dsql.region.on.aws
-TEMPORAL_SQL_PORT=5432
-TEMPORAL_SQL_USER=admin
-TEMPORAL_SQL_DATABASE=postgres
-TEMPORAL_SQL_PLUGIN=dsql
-TEMPORAL_SQL_TLS_ENABLED=true
-TEMPORAL_SQL_IAM_AUTH=true
-
-# Elasticsearch Configuration (Local)
-TEMPORAL_ELASTICSEARCH_HOST=elasticsearch
-TEMPORAL_ELASTICSEARCH_PORT=9200
-TEMPORAL_ELASTICSEARCH_SCHEME=http
-TEMPORAL_ELASTICSEARCH_INDEX=temporal_visibility_v1_dev
-
-# Connection Pool Settings
-TEMPORAL_SQL_MAX_CONNS=50
-TEMPORAL_SQL_MAX_IDLE_CONNS=50
-TEMPORAL_SQL_CONNECTION_TIMEOUT=30s
-
-# Reservoir Configuration (recommended)
-DSQL_RESERVOIR_ENABLED=true
-DSQL_RESERVOIR_TARGET_READY=50
-DSQL_RESERVOIR_BASE_LIFETIME=11m
-DSQL_RESERVOIR_LIFETIME_JITTER=2m
-DSQL_RESERVOIR_GUARD_WINDOW=45s
-DSQL_RESERVOIR_INFLIGHT_LIMIT=8
-
-# Token Bucket Rate Limiting (recommended)
-DSQL_DISTRIBUTED_RATE_LIMITER_ENABLED=true
-DSQL_DISTRIBUTED_RATE_LIMITER_TABLE=temporal-dsql-rate-limiter
-DSQL_TOKEN_BUCKET_ENABLED=true
-DSQL_TOKEN_BUCKET_RATE=100
-DSQL_TOKEN_BUCKET_CAPACITY=1000
-
-# Slot Block Connection Limiting (recommended for multi-service)
-DSQL_DISTRIBUTED_CONN_LEASE_ENABLED=true
-DSQL_DISTRIBUTED_CONN_LEASE_TABLE=temporal-dsql-conn-lease
-DSQL_SLOT_BLOCK_SIZE=100
-DSQL_SLOT_BLOCK_COUNT=100
-DSQL_SLOT_BLOCK_TTL=3m
-```
-
-### Docker Compose Services
-
+### DSQL Profile
 ```yaml
 services:
   elasticsearch:      # Visibility store
@@ -252,170 +249,30 @@ services:
   temporal-worker:    # System workflows
   temporal-ui:        # Web interface
   mimir:              # Metrics storage (Prometheus-compatible)
-  alloy:              # Metrics collection (scrapes Temporal services)
-  grafana:            # Dashboards and visualization
+  alloy:              # Metrics collection
+  grafana:            # Dashboards
 ```
 
-## Operational Procedures
+### Copilot Profile (extends DSQL)
+Adds: `loki`, `copilot-temporal`, `copilot-ui`, `copilot-worker`, `copilot-api`, plus `elasticsearch-setup` uses `temporalio/auto-setup` for ES index creation.
 
-### Daily Operations
+## Elasticsearch Setup
 
-```bash
-# Check service health
-docker compose ps
+The `elasticsearch-setup` init container uses the `temporalio/auto-setup` image (which has curl and the ES schema files) to apply cluster settings, index templates, and create visibility indices. This runs once and exits.
 
-# View service logs
-docker compose logs -f temporal-frontend
+## Working Agreements
 
-# Monitor Elasticsearch
-curl http://localhost:9200/_cat/health?v
+- Mirror existing code style, naming, and error handling patterns
+- All CLI commands go through `uv run tdeploy` — no standalone bash scripts
+- Profiles are self-contained: each has its own `.env`, config, and compose file
+- Shared resources live at the repo root: `docker/config/`, `grafana/`, `src/tdeploy/`
+- Terraform is split by lifecycle: `shared/` (long-lived) vs `copilot/` (ephemeral)
+- Connection pool: `MaxIdleConns` MUST equal `MaxConns` to prevent pool decay
 
-# Verify DSQL connectivity
-aws dsql list-clusters --region eu-west-1
-```
+## Troubleshooting
 
-### Troubleshooting
-
-#### Service Startup Issues
-```bash
-# Restart services to clear cached connection states
-docker compose restart temporal-history temporal-matching temporal-frontend temporal-worker
-
-# Check Elasticsearch health first
-curl http://localhost:9200/_cluster/health?pretty
-
-# Verify DSQL connectivity
-aws dsql list-clusters --region eu-west-1
-```
-
-#### Common Issues
-
-1. **"Shard status unknown" errors**
-   - **Cause**: Service startup timing or cached connection states
-   - **Solution**: Restart Temporal services after Elasticsearch is healthy
-
-2. **Elasticsearch connection refused**
-   - **Cause**: Elasticsearch not ready during service startup
-   - **Solution**: Ensure Elasticsearch health check passes before starting Temporal
-
-3. **DSQL access denied**
-   - **Cause**: IAM credentials expired or cluster terminated
-   - **Solution**: Check AWS credentials and cluster status
-
-4. **UI not showing workflows**
-   - **Cause**: Elasticsearch field mapping issues
-   - **Solution**: Recreate index using `./scripts/setup-elasticsearch.sh`
-
-5. **Reservoir empty checkouts**
-   - **Cause**: Rate limiter too slow or high connection churn
-   - **Solution**: Check `dsql_reservoir_empty_checkouts` metric, increase target_ready
-
-### Cleanup
-
-```bash
-# Stop services and clean up resources
-./scripts/cleanup.sh
-
-# This will:
-# - Stop and remove Docker containers
-# - Remove Docker volumes
-# - Optionally destroy AWS infrastructure
-# - Clean up generated files
-```
-
-## Development Workflow
-
-### Code Changes
-```bash
-# Rebuild images after temporal-dsql changes
-./scripts/build-temporal-dsql.sh ../temporal-dsql
-
-# Restart services
-docker compose down && docker compose up -d
-
-# Test changes
-./scripts/test.sh
-```
-
-### Schema Changes
-```bash
-# Reset schema after changes
-./scripts/setup-schema.sh
-
-# Restart services
-docker compose restart temporal-history
-```
-
-## Schema Setup
-
-**IMPORTANT**: Use `temporal-dsql-tool` for DSQL schema setup:
-
-```bash
-# Setup schema using embedded DSQL schema (recommended)
-./temporal-dsql-tool \
-    --endpoint "$CLUSTER_ENDPOINT" \
-    --region "$AWS_REGION" \
-    setup-schema \
-    --schema-name "dsql/v12/temporal" \
-    --version 1.12
-```
-
-**For complete reset (with overwrite):**
-```bash
-./temporal-dsql-tool \
-    --endpoint "$CLUSTER_ENDPOINT" \
-    --region "$AWS_REGION" \
-    setup-schema \
-    --schema-name "dsql/v12/temporal" \
-    --version 1.12 \
-    --overwrite
-```
-
-## Grafana Dashboard
-
-Access Grafana at http://localhost:3000 (admin/admin) to monitor:
-
-- `dsql_reservoir_size` - Should stay at target_ready
-- `dsql_reservoir_checkouts` - Successful connection checkouts
-- `dsql_reservoir_empty_checkouts` - Should be 0 if reservoir is healthy
-- `dsql_refiller_inflight` - Concurrent Open() calls (should be ≤ 8)
-- `dsql_slot_blocks_owned` - Slot blocks owned by this service
-- `dsql_slot_blocks_slots_used` - Slots currently in use
-- `dsql_pool_in_use` - Connections actively in use
-- `dsql_tx_conflict_total` - OCC conflicts (expected under load)
-
-## Implementation Status
-
-### ✅ Completed Features
-- **DSQL Integration**: Full persistence layer with optimistic concurrency control
-- **Connection Reservoir**: Rate-limit-aware connection management
-- **Distributed Connection Leasing**: DynamoDB-backed global connection coordination
-- **Elasticsearch Integration**: Local visibility store with proper field mappings
-- **Docker Orchestration**: Complete service dependency management
-- **Schema Management**: Automated setup using temporal-dsql-tool
-- **Observability Stack**: Grafana + Alloy + Mimir for metrics and dashboards
-
-### 🚀 Production Ready
-- **Core Functionality**: All Temporal features working with DSQL + Elasticsearch
-- **UI Integration**: Workflows visible and searchable in Temporal UI
-- **Error Handling**: Robust retry logic for DSQL serialization conflicts
-- **Monitoring**: Service health checks and connectivity validation
-
-## Scripts
-
-| Script | Description |
-|--------|-------------|
-| `build-temporal-dsql.sh` | Build Docker image from temporal-dsql repo |
-| `deploy.sh` | Deploy DSQL infrastructure via Terraform |
-| `setup-schema.sh` | Initialize DSQL database schema |
-| `setup-elasticsearch.sh` | Create Elasticsearch visibility index |
-| `setup-rate-limiter-table.sh` | Create DynamoDB table for distributed rate limiting |
-| `setup-conn-lease-table.sh` | Create DynamoDB table for distributed connection leasing |
-| `test.sh` | Run integration tests |
-| `cleanup.sh` | Stop services and optionally destroy infrastructure |
-
-## Related Documentation
-
-- `temporal-dsql/docs/dsql/reservoir-design.md` - Comprehensive reservoir architecture
-- `temporal-dsql/docs/dsql/implementation.md` - DSQL plugin implementation details
-- `temporal-dsql/docs/dsql/metrics.md` - Metrics reference
+1. **DSQL connection issues** — Check `aws sts get-caller-identity`, verify cluster status
+2. **Elasticsearch issues** — `docker compose logs elasticsearch`, check http://localhost:9200/_cluster/health
+3. **Temporal crash loops** — Check logs for schema errors, run `uv run tdeploy schema setup`
+4. **Reservoir empty checkouts** — Check `dsql_reservoir_empty_total` in Grafana, increase target
+5. **Shard ownership churn** — Restart all services: `uv run tdeploy services down && uv run tdeploy services up -d`
