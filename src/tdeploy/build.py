@@ -140,24 +140,6 @@ async def _build_temporal_async(source_path: Path, arch: str) -> None:
     console.print(f"  temporal-dsql-runtime:test    (linux/{arch})")
 
 
-async def _build_copilot_async(source_path: Path) -> None:
-    """Build the Copilot Docker image using Dagger."""
-    config = dagger.Config(log_output=sys.stderr)
-
-    async with dagger.connection(config):
-        source_dir = dag.host().directory(
-            str(source_path),
-            exclude=[".git", ".venv", "**/__pycache__", ".mypy_cache"],
-        )
-
-        copilot = source_dir.docker_build()
-
-        await copilot.export_image.__wrapped__(copilot, "temporal-sre-copilot:dev")
-
-    console.print()
-    console.print("[green]✓[/green] Image built: temporal-sre-copilot:dev")
-
-
 @app.command()
 def temporal(
     source: Annotated[str, typer.Argument(help="Path to temporal-dsql repository")] = "../temporal-dsql",
@@ -180,21 +162,3 @@ def temporal(
     console.print()
 
     anyio.run(_build_temporal_async, source_path, arch)
-
-
-@app.command()
-def copilot(
-    source: Annotated[str, typer.Argument(help="Path to temporal-sre-copilot repository")] = "../temporal-sre-copilot",
-) -> None:
-    """Build the Copilot Docker image."""
-    console.print(Panel.fit("Building Copilot Image", style="bold blue"))
-
-    source_path = Path(source).resolve()
-    if not source_path.exists():
-        console.print(f"[red]Error:[/red] temporal-sre-copilot directory not found: {source_path}")
-        raise typer.Exit(1)
-
-    console.print(f"  Source: [cyan]{source_path}[/cyan]")
-    console.print()
-
-    anyio.run(_build_copilot_async, source_path)

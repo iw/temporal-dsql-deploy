@@ -2,19 +2,11 @@
 
 ## Mission
 
-Local development environment for two interrelated projects:
-
-1. **DSQL persistence plugin** — The [temporal-dsql](https://github.com/iw/temporal) fork adds Aurora DSQL as a first-class persistence backend for Temporal. This repo provides the Docker Compose stack to build, run, and observe Temporal against a real DSQL cluster with full observability.
-
-2. **Temporal SRE Copilot** — The [temporal-sre-copilot](https://github.com/iw/temporal-sre-copilot) is an AI-powered observability agent that monitors a Temporal+DSQL deployment, derives health state from forward progress signals, and uses LLMs to explain what's happening. This repo provides the monitored cluster, observability stack (Mimir + Loki), and a second Temporal cluster for the Copilot's own Pydantic AI workflows.
-
-Both use cases share the same foundation: Temporal services against Aurora DSQL, Elasticsearch for visibility, and Grafana for dashboards. The Copilot profile extends this with Loki, a second Temporal cluster, and Amazon Bedrock integration.
+Local development environment for the [temporal-dsql](https://github.com/iw/temporal) fork, which adds Aurora DSQL as a first-class persistence backend for Temporal. This repo provides the Docker Compose stack to build, run, and observe Temporal against a real DSQL cluster with full observability.
 
 This is **not** a production deployment solution. For production, see `temporal-dsql-deploy-ecs`.
 
 ## Architecture
-
-### DSQL Profile — Plugin development
 
 Four Temporal services against a DSQL cluster, with Elasticsearch for visibility and Alloy → Mimir → Grafana for metrics.
 
@@ -41,42 +33,6 @@ Four Temporal services against a DSQL cluster, with Elasticsearch for visibility
                    │  (Persistence)  │
                    │  IAM Auth       │
                    └─────────────────┘
-```
-
-### Copilot Profile — SRE Copilot development
-
-Everything in the DSQL profile, plus Loki for log collection, a second Temporal cluster for the Copilot's own Pydantic AI workflows, and Bedrock integration for AI-powered health assessments.
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     DOCKER COMPOSE NETWORK                          │
-│                                                                     │
-│  MONITORED CLUSTER              OBSERVABILITY        COPILOT        │
-│  ┌──────────────────┐          ┌────────────┐       ┌────────────┐ │
-│  │ temporal-frontend │──┐      │ mimir      │       │ copilot-   │ │
-│  │ temporal-history  │  │      │ (metrics)  │◄──────│ temporal   │ │
-│  │ temporal-matching │  ├─────▶│            │       │            │ │
-│  │ temporal-worker   │  │      ├────────────┤       ├────────────┤ │
-│  └──────────────────┘  │      │ loki       │       │ copilot-   │ │
-│  ┌──────────────────┐  │      │ (logs)     │◄──────│ worker     │ │
-│  │ elasticsearch    │  │      ├────────────┤       │ (Pydantic  │ │
-│  │ temporal-ui      │  │      │ alloy      │       │  AI)       │ │
-│  └──────────────────┘  │      │ (collector)│       ├────────────┤ │
-│                        │      ├────────────┤       │ copilot-   │ │
-│                        └─────▶│ grafana    │◄──────│ api        │ │
-│                               │ :3000      │       │ :8081      │ │
-│                               └────────────┘       └────────────┘ │
-│                                                          │        │
-│  ┌──────────────────┐                          ┌─────────▼──────┐ │
-│  │ Aurora DSQL      │                          │ Aurora DSQL    │ │
-│  │ (monitored)      │                          │ (copilot)      │ │
-│  └──────────────────┘                          └────────────────┘ │
-│                                                          │        │
-│                                                ┌─────────▼──────┐ │
-│                                                │ Amazon Bedrock │ │
-│                                                │ (Claude, KB)   │ │
-│                                                └────────────────┘ │
-└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Quick Start
@@ -118,72 +74,32 @@ open http://localhost:3000    # Grafana (admin/admin)
 uv run tdeploy services down
 ```
 
-### Copilot Setup
-
-```bash
-# Provision ephemeral Copilot infrastructure (DSQL cluster + Bedrock KB)
-uv run tdeploy infra apply-copilot
-
-# Build both images
-uv run tdeploy build temporal ../temporal-dsql
-uv run tdeploy build copilot ../temporal-sre-copilot
-
-# Configure and start
-cd profiles/copilot && cp .env.example .env
-# Edit .env — set both DSQL endpoints + Bedrock KB ID
-cd ../..
-uv run tdeploy schema setup --profile copilot
-uv run tdeploy schema setup-copilot
-uv run tdeploy services up -p copilot -d
-
-# When done
-uv run tdeploy services down -p copilot
-uv run tdeploy infra destroy-copilot
-```
-
-## Profiles
-
-| Profile | Purpose | Services | Memory |
-|---------|---------|----------|--------|
-| [dsql](profiles/dsql/) | DSQL plugin development and testing | 9 (Temporal + ES + observability) | ~3.5 GB |
-| [copilot](profiles/copilot/) | SRE Copilot development with monitored cluster | 15 (above + Loki + Copilot cluster + Bedrock) | ~5 GB |
-
 ## Project Structure
 
 ```
 temporal-dsql-deploy/
 ├── src/tdeploy/               # Typer CLI (uv run tdeploy)
 │   ├── main.py                # App with subcommands
-│   ├── infra.py               # infra apply-shared / apply-copilot / destroy-copilot
-│   ├── build.py               # build temporal / copilot
-│   ├── kb.py                  # kb sync / ingest / status (Knowledge Base)
-│   ├── schema.py              # schema setup / setup-copilot
+│   ├── infra.py               # infra apply-shared / status
+│   ├── build.py               # build temporal
+│   ├── schema.py              # schema setup
 │   └── services.py            # services up / down / ps / logs
-├── terraform/                 # Modular Terraform
-│   ├── shared/                # Long-lived: DSQL cluster + optional DynamoDB
-│   └── copilot/               # Ephemeral: Copilot DSQL cluster + Bedrock KB
-├── profiles/                  # Deployment profiles
-│   ├── dsql/                  # DSQL development profile
-│   │   ├── docker-compose.yml
-│   │   ├── .env.example
-│   │   ├── dynamicconfig/
-│   │   └── README.md
-│   └── copilot/               # SRE Copilot profile
+├── terraform/
+│   └── shared/                # Long-lived: DSQL cluster + optional DynamoDB
+├── profiles/
+│   └── dsql/                  # DSQL development profile
 │       ├── docker-compose.yml
 │       ├── .env.example
-│       ├── config/            # Loki, Alloy, Grafana config
 │       ├── dynamicconfig/
 │       └── README.md
 ├── docker/                    # Shared Docker configuration
 │   └── config/                # Config templates and provisioning
-├── grafana/                   # Shared Grafana dashboards
+├── grafana/                   # Grafana dashboards
 │   ├── server/server.json     # Temporal server health
-│   ├── dsql/persistence.json  # DSQL persistence metrics
-│   └── copilot/copilot.json   # SRE Copilot health state
+│   └── dsql/persistence.json  # DSQL persistence metrics
 ├── dsql-tests/                # Python integration tests
 │   ├── temporal/              # Temporal feature validation on DSQL
-│   ├── plugin/                # DSQL plugin validation
-│   └── copilot/               # Copilot stress & integration tests
+│   └── plugin/                # DSQL plugin validation
 ├── Dockerfile                 # Temporal DSQL runtime image
 └── pyproject.toml             # Project config (uv)
 ```
@@ -195,32 +111,20 @@ All commands run from the repo root with `uv run tdeploy`:
 ```bash
 # Infrastructure
 uv run tdeploy infra apply-shared -p temporal-dev
-uv run tdeploy infra apply-copilot
-uv run tdeploy infra destroy-copilot
 uv run tdeploy infra status
 
 # Build
 uv run tdeploy build temporal ../temporal-dsql
-uv run tdeploy build copilot ../temporal-sre-copilot
 
 # Schema
 uv run tdeploy schema setup
-uv run tdeploy schema setup --profile copilot
-uv run tdeploy schema setup-copilot
 
 # Services
 uv run tdeploy services up -d
-uv run tdeploy services up -p copilot -d
 uv run tdeploy services down
 uv run tdeploy services down -v
 uv run tdeploy services ps
 uv run tdeploy services logs -f temporal-history
-
-# Knowledge Base (copilot profile)
-uv run tdeploy kb populate
-uv run tdeploy kb sync
-uv run tdeploy kb ingest
-uv run tdeploy kb status
 ```
 
 ## Connection Reservoir
@@ -239,7 +143,6 @@ Distributed rate limiting and connection leasing (DynamoDB-backed) are available
 
 ## Docker Compose Services
 
-### DSQL Profile
 ```yaml
 services:
   elasticsearch:      # Visibility store
@@ -253,20 +156,12 @@ services:
   grafana:            # Dashboards
 ```
 
-### Copilot Profile (extends DSQL)
-Adds: `loki`, `copilot-temporal`, `copilot-ui`, `copilot-worker`, `copilot-api`, plus `elasticsearch-setup` uses `temporalio/auto-setup` for ES index creation.
-
-## Elasticsearch Setup
-
-The `elasticsearch-setup` init container uses the `temporalio/auto-setup` image (which has curl and the ES schema files) to apply cluster settings, index templates, and create visibility indices. This runs once and exits.
-
 ## Working Agreements
 
 - Mirror existing code style, naming, and error handling patterns
 - All CLI commands go through `uv run tdeploy` — no standalone bash scripts
 - Profiles are self-contained: each has its own `.env`, config, and compose file
 - Shared resources live at the repo root: `docker/config/`, `grafana/`, `src/tdeploy/`
-- Terraform is split by lifecycle: `shared/` (long-lived) vs `copilot/` (ephemeral)
 - Connection pool: `MaxIdleConns` MUST equal `MaxConns` to prevent pool decay
 
 ## Troubleshooting

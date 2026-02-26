@@ -4,7 +4,6 @@ import typer
 
 from tdeploy.infra import app as infra_app
 from tdeploy.build import app as build_app
-from tdeploy.kb import app as kb_app
 from tdeploy.schema import app as schema_app
 from tdeploy.services import app as services_app
 
@@ -16,7 +15,6 @@ app = typer.Typer(
 
 app.add_typer(infra_app, name="infra", help="Provision and manage AWS infrastructure")
 app.add_typer(build_app, name="build", help="Build Docker images")
-app.add_typer(kb_app, name="kb", help="Knowledge Base — sync RAG docs and trigger ingestion")
 app.add_typer(schema_app, name="schema", help="Setup and manage DSQL schemas")
 app.add_typer(services_app, name="services", help="Start, stop, and manage Docker services")
 

@@ -12,7 +12,7 @@ from tdeploy.paths import profiles_dir
 app = typer.Typer(no_args_is_help=True)
 console = Console()
 
-PROFILES = ["dsql", "copilot"]
+PROFILES = ["dsql"]
 
 
 def _compose(profile: str, args: list[str]) -> None:
