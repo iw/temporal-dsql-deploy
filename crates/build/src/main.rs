@@ -70,12 +70,19 @@ pub fn go_version_from_mod(source: &Path) -> Result<String> {
         std::fs::read_to_string(source.join("go.mod")).wrap_err("Failed to read go.mod")?;
     for line in go_mod.lines() {
         if let Some(rest) = line.strip_prefix("go ") {
-            let version = rest.trim();
-            let parts: Vec<&str> = version.split('.').collect();
-            return Ok(parts[..2.min(parts.len())].join("."));
+            return normalize_go_version(rest.trim());
         }
     }
     bail!("Could not find 'go' directive in go.mod")
+}
+
+fn normalize_go_version(version: &str) -> Result<String> {
+    let parts: Vec<&str> = version.split('.').collect();
+    match parts.len() {
+        0 => bail!("invalid Go version in go.mod: '{version}'"),
+        1 => Ok(parts[0].to_string()),
+        _ => Ok(format!("{}.{}", parts[0], parts[1])),
+    }
 }
 
 /// Resolve the docker directory relative to the workspace root.
@@ -235,4 +242,70 @@ fn build_temporal(source: &Path, arch: &str) -> Result<()> {
     eprintln!("  temporal-dsql-tool:latest     (linux/{arch})");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_dir(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).expect("create temp test directory");
+        path
+    }
+
+    #[test]
+    fn resolve_temporal_dsql_path_accepts_explicit_valid_repo() {
+        let dir = make_test_dir("dsqld-build-test-valid-repo");
+        std::fs::write(dir.join("go.mod"), "module example\n\ngo 1.24.3\n").expect("write go.mod");
+
+        let resolved = resolve_temporal_dsql_path(Some(dir.clone())).expect("valid repo");
+        assert_eq!(
+            resolved,
+            dir.canonicalize().expect("canonicalize temp repo path")
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn resolve_temporal_dsql_path_rejects_missing_go_mod() {
+        let dir = make_test_dir("dsqld-build-test-missing-gomod");
+
+        let err = resolve_temporal_dsql_path(Some(dir.clone())).expect_err("should fail");
+        let msg = err.to_string();
+        assert!(msg.contains("no go.mod found"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn go_version_from_mod_extracts_major_minor() {
+        let dir = make_test_dir("dsqld-build-test-go-version");
+        std::fs::write(dir.join("go.mod"), "module example\n\ngo 1.24.3\n").expect("write go.mod");
+
+        let version = go_version_from_mod(&dir).expect("extract go version");
+        assert_eq!(version, "1.24");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn go_version_from_mod_errors_without_go_directive() {
+        let dir = make_test_dir("dsqld-build-test-go-missing-directive");
+        std::fs::write(dir.join("go.mod"), "module example\n").expect("write go.mod");
+
+        let err = go_version_from_mod(&dir).expect_err("missing go directive should fail");
+        assert!(err.to_string().contains("Could not find 'go' directive"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn normalize_go_version_handles_minor_only_and_patch_versions() {
+        assert_eq!(normalize_go_version("1.24").expect("parse"), "1.24");
+        assert_eq!(normalize_go_version("1.24.3").expect("parse"), "1.24");
+        assert_eq!(normalize_go_version("1").expect("parse"), "1");
+    }
 }

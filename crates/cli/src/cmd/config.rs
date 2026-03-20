@@ -32,15 +32,23 @@ fn init(name: &str, region: &str) -> Result<()> {
         );
     }
 
-    let content = CONFIG_TEMPLATE
-        .replace("name = \"temporal-dev\"", &format!("name = \"{name}\""))
-        .replace("region = \"eu-west-1\"", &format!("region = \"{region}\""));
+    let content = render_config_template(name, region);
 
     std::fs::write(&path, content)?;
     eprintln!("▸ wrote {}", path.display());
     eprintln!("  project: {name}");
     eprintln!("  region:  {region}");
     Ok(())
+}
+
+fn render_config_template(name: &str, region: &str) -> String {
+    CONFIG_TEMPLATE
+        .replace("__PROJECT_NAME__", &escape_toml_string(name))
+        .replace("__PROJECT_REGION__", &escape_toml_string(region))
+}
+
+fn escape_toml_string(value: &str) -> String {
+    toml::Value::String(value.to_string()).to_string()
 }
 
 const CONFIG_TEMPLATE: &str = r#"# ─────────────────────────────────────────────────────────────────────────────
@@ -55,8 +63,8 @@ const CONFIG_TEMPLATE: &str = r#"# ───────────────
 # (DSQL cluster, DynamoDB tables).
 
 [project]
-name = "temporal-dev"                          # Project name (resource prefix)
-region = "eu-west-1"                           # AWS region
+name = __PROJECT_NAME__                        # Project name (resource prefix)
+region = __PROJECT_REGION__                    # AWS region
 
 # ─── Aurora DSQL Persistence ─────────────────────────────────────────────────
 # DSQL has two cluster-wide constraints that drive this configuration:
@@ -148,3 +156,21 @@ image = "temporal-dsql-server:latest"          # Docker image for Temporal servi
 rate_limiter_table = ""                        # Default: {project.name}-dsql-rate-limiter
 conn_lease_table = ""                          # Default: {project.name}-dsql-conn-lease
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_template_escapes_user_input() {
+        let name = "dev\"\n[dsql]\nidentifier = \"hijack";
+        let region = "eu-west-1";
+        let rendered = render_config_template(name, region);
+
+        let parsed: dsqld_config::ProjectConfig =
+            toml::from_str(&rendered).expect("rendered template should be valid TOML");
+        assert_eq!(parsed.project.name, name);
+        assert_eq!(parsed.project.region, region);
+        assert!(parsed.dsql.identifier.is_empty());
+    }
+}

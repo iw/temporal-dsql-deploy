@@ -35,6 +35,10 @@ pub enum DevAction {
 }
 
 pub fn dev(action: DevAction) -> Result<()> {
+    if action_requires_env(&action) {
+        prepare_env()?;
+    }
+
     match action {
         DevAction::Up { detach } => up(detach),
         DevAction::Down { volumes } => down(volumes),
@@ -42,6 +46,10 @@ pub fn dev(action: DevAction) -> Result<()> {
         DevAction::Logs { service, follow } => logs(service.as_deref(), follow),
         DevAction::Restart { services } => restart(&services),
     }
+}
+
+fn action_requires_env(action: &DevAction) -> bool {
+    !matches!(action, DevAction::Down { .. })
 }
 
 /// Run a docker compose command against dev/docker-compose.yml.
@@ -57,6 +65,14 @@ fn compose(args: &[&str]) -> Result<()> {
 
 /// Load config, validate, generate dev/.env, then start the compose stack.
 fn up(detach: bool) -> Result<()> {
+    let mut args = vec!["up"];
+    if detach {
+        args.push("-d");
+    }
+    compose(&args)
+}
+
+fn prepare_env() -> Result<()> {
     let config = dsqld_config::load_config(&paths::config_file())?;
     dsqld_config::validate::validate(&config)?;
 
@@ -67,12 +83,7 @@ fn up(detach: bool) -> Result<()> {
     }
     std::fs::write(&env_path, env_content)?;
     eprintln!("▸ wrote {}", env_path.display());
-
-    let mut args = vec!["up"];
-    if detach {
-        args.push("-d");
-    }
-    compose(&args)
+    Ok(())
 }
 
 fn down(volumes: bool) -> Result<()> {
@@ -99,4 +110,21 @@ fn restart(services: &[String]) -> Result<()> {
     let mut args = vec!["restart"];
     args.extend_from_slice(&svc_refs);
     compose(&args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn down_does_not_require_env_generation() {
+        assert!(!action_requires_env(&DevAction::Down { volumes: false }));
+    }
+
+    #[test]
+    fn restart_requires_env_generation() {
+        assert!(action_requires_env(&DevAction::Restart {
+            services: vec!["temporal-history".to_string()],
+        }));
+    }
 }

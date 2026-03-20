@@ -9,8 +9,16 @@ use std::path::Path;
 
 /// Load and deserialize config.toml from the given path.
 pub fn load_config(path: &Path) -> Result<ProjectConfig, ConfigError> {
-    let contents =
-        std::fs::read_to_string(path).map_err(|_| ConfigError::NotFound(path.to_path_buf()))?;
+    let contents = std::fs::read_to_string(path).map_err(|source| {
+        if source.kind() == std::io::ErrorKind::NotFound {
+            ConfigError::NotFound(path.to_path_buf())
+        } else {
+            ConfigError::Read {
+                path: path.to_path_buf(),
+                source,
+            }
+        }
+    })?;
     let config: ProjectConfig = toml::from_str(&contents)?;
     Ok(config)
 }
@@ -54,6 +62,17 @@ identifier = "my-cluster-id"
     fn load_config_not_found() {
         let result = load_config(Path::new("/nonexistent/config.toml"));
         assert!(matches!(result, Err(ConfigError::NotFound(_))));
+    }
+
+    #[test]
+    fn load_config_read_error_for_non_file_path() {
+        let dir = std::env::temp_dir().join("dsqld-config-test-read-error");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let result = load_config(&dir);
+        assert!(matches!(result, Err(ConfigError::Read { .. })));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

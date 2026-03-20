@@ -15,6 +15,7 @@ color-eyre = { workspace = true }
 which = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
+toml_edit = "0.22"
 dsqld-config = { workspace = true }
 aws-config = { workspace = true }
 aws-sdk-dsql = { workspace = true }

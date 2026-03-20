@@ -800,6 +800,7 @@ dependencies = [
  "eyre",
  "tokio",
  "toml",
+ "toml_edit",
  "which",
 ]
 

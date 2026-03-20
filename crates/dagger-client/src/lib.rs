@@ -38,6 +38,12 @@ pub struct DirectoryId(String);
 #[derive(Debug, Clone)]
 pub struct FileId(String);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DockerLoadResult {
+    ImageId(String),
+    ImageRef(String),
+}
+
 // ── Client ──────────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -277,24 +283,54 @@ impl<'c> Container<'c> {
             bail!("`docker load` failed: {stderr}");
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        // Parse image ID from "Loaded image ID: sha256:abc123..."
-        if let Some(id) = stdout
-            .lines()
-            .find_map(|line| line.strip_prefix("Loaded image ID: "))
-        {
-            let status = std::process::Command::new("docker")
-                .args(["tag", id.trim(), tag])
-                .status()
-                .wrap_err("Failed to run `docker tag`")?;
-            if !status.success() {
-                bail!("`docker tag {id} {tag}` failed");
+        let output_text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        match parse_docker_load_output(&output_text) {
+            Some(DockerLoadResult::ImageId(id)) => {
+                tag_loaded_image(&id, tag)?;
+            }
+            Some(DockerLoadResult::ImageRef(image_ref)) => {
+                if image_ref != tag {
+                    tag_loaded_image(&image_ref, tag)?;
+                }
+            }
+            None => {
+                bail!(
+                    "could not determine loaded image from `docker load` output; output was: {}",
+                    output_text.trim()
+                );
             }
         }
 
         let _ = std::fs::remove_file(&tarball);
         Ok(())
     }
+}
+
+fn parse_docker_load_output(output: &str) -> Option<DockerLoadResult> {
+    for line in output.lines() {
+        if let Some(id) = line.strip_prefix("Loaded image ID: ") {
+            return Some(DockerLoadResult::ImageId(id.trim().to_string()));
+        }
+        if let Some(image_ref) = line.strip_prefix("Loaded image: ") {
+            return Some(DockerLoadResult::ImageRef(image_ref.trim().to_string()));
+        }
+    }
+    None
+}
+
+fn tag_loaded_image(source: &str, target: &str) -> Result<()> {
+    let status = std::process::Command::new("docker")
+        .args(["tag", source, target])
+        .status()
+        .wrap_err("Failed to run `docker tag`")?;
+    if !status.success() {
+        bail!("`docker tag {source} {target}` failed");
+    }
+    Ok(())
 }
 
 // ── Directory ───────────────────────────────────────────────
@@ -363,4 +399,35 @@ pub fn check_graphql_errors(resp: &Value) -> Result<()> {
 /// JSON-escape and quote a string for embedding in a GraphQL query.
 pub fn quote(s: &str) -> String {
     serde_json::to_string(s).expect("string serialization cannot fail")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_loaded_image_id_output() {
+        let out = "Loaded image ID: sha256:abc123";
+        assert_eq!(
+            parse_docker_load_output(out),
+            Some(DockerLoadResult::ImageId("sha256:abc123".to_string()))
+        );
+    }
+
+    #[test]
+    fn parses_loaded_image_reference_output() {
+        let out = "Loaded image: temporary-import:latest";
+        assert_eq!(
+            parse_docker_load_output(out),
+            Some(DockerLoadResult::ImageRef(
+                "temporary-import:latest".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn returns_none_for_unexpected_output() {
+        let out = "random output";
+        assert_eq!(parse_docker_load_output(out), None);
+    }
 }

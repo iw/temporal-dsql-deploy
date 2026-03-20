@@ -5,6 +5,7 @@ use std::time::Duration;
 use aws_sdk_dsql::client::Waiters;
 use clap::Subcommand;
 use eyre::{Result, bail};
+use toml_edit::value;
 
 use crate::paths;
 
@@ -252,10 +253,7 @@ async fn create_dynamodb_table(
 
 /// Poll DescribeTable until the table status is ACTIVE (up to 60s).
 /// Tolerates ResourceNotFoundException right after CreateTable (eventual consistency).
-async fn wait_for_table_active(
-    client: &aws_sdk_dynamodb::Client,
-    table_name: &str,
-) -> Result<()> {
+async fn wait_for_table_active(client: &aws_sdk_dynamodb::Client, table_name: &str) -> Result<()> {
     for _ in 0..30 {
         match client.describe_table().table_name(table_name).send().await {
             Ok(resp) => {
@@ -287,10 +285,7 @@ async fn wait_for_table_active(
 /// Check whether TTL needs to be enabled on a table. Returns `true` if TTL is
 /// `Disabled` or not yet configured. Retries on `ResourceNotFoundException`
 /// (eventual consistency after table creation).
-async fn should_enable_ttl(
-    client: &aws_sdk_dynamodb::Client,
-    table_name: &str,
-) -> Result<bool> {
+async fn should_enable_ttl(client: &aws_sdk_dynamodb::Client, table_name: &str) -> Result<bool> {
     for attempt in 0..10 {
         match client
             .describe_time_to_live()
@@ -316,10 +311,7 @@ async fn should_enable_ttl(
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     continue;
                 }
-                return Err(classify_aws_error(
-                    "dynamodb:DescribeTimeToLive",
-                    svc_err,
-                ));
+                return Err(classify_aws_error("dynamodb:DescribeTimeToLive", svc_err));
             }
         }
     }
@@ -367,16 +359,28 @@ fn write_infra_to_config(identifier: &str, rate_table: &str, lease_table: &str) 
     let contents = std::fs::read_to_string(&path)
         .map_err(|_| eyre::eyre!("could not read {}", path.display()))?;
 
-    let mut config: dsqld_config::ProjectConfig = toml::from_str(&contents)?;
-    config.dsql.identifier = identifier.to_string();
-    config.dsql.rate_coordination.table_name = rate_table.to_string();
-    config.dsql.conn_lease.table_name = lease_table.to_string();
-    config.dynamodb.rate_limiter_table = rate_table.to_string();
-    config.dynamodb.conn_lease_table = lease_table.to_string();
-
-    let updated = toml::to_string_pretty(&config)?;
+    let updated = update_infra_config_toml(&contents, identifier, rate_table, lease_table)?;
     std::fs::write(&path, updated)?;
     Ok(())
+}
+
+fn update_infra_config_toml(
+    contents: &str,
+    identifier: &str,
+    rate_table: &str,
+    lease_table: &str,
+) -> Result<String> {
+    let mut doc = contents
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| eyre::eyre!("failed to parse config.toml as TOML document: {e}"))?;
+
+    doc["dsql"]["identifier"] = value(identifier);
+    doc["dsql"]["rate_coordination"]["table_name"] = value(rate_table);
+    doc["dsql"]["conn_lease"]["table_name"] = value(lease_table);
+    doc["dynamodb"]["rate_limiter_table"] = value(rate_table);
+    doc["dynamodb"]["conn_lease_table"] = value(lease_table);
+
+    Ok(doc.to_string())
 }
 
 // ─── Destroy ────────────────────────────────────────────────────────────────
@@ -410,8 +414,16 @@ async fn destroy() -> Result<()> {
     let ddb_client = aws_sdk_dynamodb::Client::new(&sdk_config);
 
     // 1. Delete DynamoDB tables
-    let rate_table = rate_limiter_table_name(project);
-    let lease_table = conn_lease_table_name(project);
+    let rate_table = table_name_for_destroy(
+        &config.dsql.rate_coordination.table_name,
+        &config.dynamodb.rate_limiter_table,
+        &rate_limiter_table_name(project),
+    );
+    let lease_table = table_name_for_destroy(
+        &config.dsql.conn_lease.table_name,
+        &config.dynamodb.conn_lease_table,
+        &conn_lease_table_name(project),
+    );
 
     eprintln!("▸ deleting DynamoDB table '{rate_table}'…");
     delete_dynamodb_table(&ddb_client, &rate_table).await?;
@@ -439,9 +451,7 @@ async fn destroy() -> Result<()> {
                 .deletion_protection_enabled(false)
                 .send()
                 .await
-                .map_err(|e| {
-                    classify_aws_error("dsql:UpdateCluster", e.into_service_error())
-                })?;
+                .map_err(|e| classify_aws_error("dsql:UpdateCluster", e.into_service_error()))?;
 
             eprintln!("▸ deleting DSQL cluster '{cluster_id}'…");
             dsql_client
@@ -449,9 +459,7 @@ async fn destroy() -> Result<()> {
                 .identifier(&cluster_id)
                 .send()
                 .await
-                .map_err(|e| {
-                    classify_aws_error("dsql:DeleteCluster", e.into_service_error())
-                })?;
+                .map_err(|e| classify_aws_error("dsql:DeleteCluster", e.into_service_error()))?;
 
             // Use SDK waiter for deletion polling
             eprintln!("  waiting for cluster deletion…");
@@ -469,6 +477,16 @@ async fn destroy() -> Result<()> {
 
     eprintln!("\n✓ infrastructure destroyed");
     Ok(())
+}
+
+fn table_name_for_destroy(dsql_table: &str, dynamodb_table: &str, derived_table: &str) -> String {
+    if !dsql_table.is_empty() {
+        return dsql_table.to_string();
+    }
+    if !dynamodb_table.is_empty() {
+        return dynamodb_table.to_string();
+    }
+    derived_table.to_string()
 }
 
 /// Delete a DynamoDB table, handling not-found gracefully.
@@ -506,10 +524,7 @@ async fn client_get_cluster(
 /// Find an ACTIVE DSQL cluster by its `Name` tag. Lists all clusters, calls
 /// GetCluster on each to inspect tags (ClusterSummary doesn't include tags).
 /// Returns the cluster identifier if found.
-async fn find_cluster_by_name(
-    client: &aws_sdk_dsql::Client,
-    name: &str,
-) -> Result<Option<String>> {
+async fn find_cluster_by_name(client: &aws_sdk_dsql::Client, name: &str) -> Result<Option<String>> {
     let mut paginator = client.list_clusters().into_paginator().send();
 
     while let Some(page) = paginator.next().await {
@@ -544,7 +559,6 @@ async fn find_cluster_by_name(
 
     Ok(None)
 }
-
 
 // ─── Status ─────────────────────────────────────────────────────────────────
 
@@ -584,10 +598,14 @@ async fn status() -> Result<()> {
                 let detail = client_get_cluster(&dsql_client, &id).await?;
                 let endpoint = detail.endpoint().unwrap_or_default();
                 eprintln!("dsql cluster:  {id} (ACTIVE, endpoint: {endpoint})");
-                eprintln!("  hint: run `dsqld infra apply` to populate dsql.identifier in config.toml");
+                eprintln!(
+                    "  hint: run `dsqld infra apply` to populate dsql.identifier in config.toml"
+                );
             }
             None => {
-                eprintln!("dsql cluster: not provisioned (no identifier in config, no cluster with Name={derived_name})");
+                eprintln!(
+                    "dsql cluster: not provisioned (no identifier in config, no cluster with Name={derived_name})"
+                );
             }
         }
     }
@@ -649,5 +667,65 @@ fn classify_aws_error<E: std::fmt::Display>(operation: &str, err: E) -> eyre::Re
         )
     } else {
         eyre::eyre!("{operation} failed: {msg}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn destroy_prefers_dsql_table_name_from_config() {
+        let selected = table_name_for_destroy("configured-dsql", "configured-ddb", "derived");
+        assert_eq!(selected, "configured-dsql");
+    }
+
+    #[test]
+    fn destroy_falls_back_to_dynamodb_then_derived() {
+        let selected = table_name_for_destroy("", "configured-ddb", "derived");
+        assert_eq!(selected, "configured-ddb");
+
+        let selected = table_name_for_destroy("", "", "derived");
+        assert_eq!(selected, "derived");
+    }
+
+    #[test]
+    fn infra_config_update_preserves_comments_and_unknown_fields() {
+        let original = r#"# keep this comment
+[project]
+name = "dev"
+region = "eu-west-1"
+
+[dsql]
+identifier = ""
+
+[dsql.rate_coordination]
+table_name = ""
+
+[dsql.conn_lease]
+table_name = ""
+
+[dynamodb]
+rate_limiter_table = ""
+conn_lease_table = ""
+
+[custom]
+flag = true
+"#;
+
+        let updated = update_infra_config_toml(original, "cluster-1", "rate-1", "lease-1")
+            .expect("update should succeed");
+
+        assert!(updated.contains("# keep this comment"));
+        assert!(updated.contains("[custom]"));
+        assert!(updated.contains("flag = true"));
+
+        let parsed: dsqld_config::ProjectConfig =
+            toml::from_str(&updated).expect("updated config should parse");
+        assert_eq!(parsed.dsql.identifier, "cluster-1");
+        assert_eq!(parsed.dsql.rate_coordination.table_name, "rate-1");
+        assert_eq!(parsed.dsql.conn_lease.table_name, "lease-1");
+        assert_eq!(parsed.dynamodb.rate_limiter_table, "rate-1");
+        assert_eq!(parsed.dynamodb.conn_lease_table, "lease-1");
     }
 }

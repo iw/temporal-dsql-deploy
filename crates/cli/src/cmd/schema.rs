@@ -56,21 +56,33 @@ fn setup(version: &str, overwrite: bool, image: &str) -> Result<()> {
 
     // temporal-dsql-tool lives in a Docker image built by `dsqld build temporal`.
     // Run it via `docker run` with host AWS credentials and IMDS disabled.
-    let home = std::env::var("HOME")
-        .map_err(|_| eyre::eyre!("HOME not set"))?;
+    let home = std::env::var("HOME").map_err(|_| eyre::eyre!("HOME not set"))?;
     let aws_mount = format!("{home}/.aws:/home/temporal/.aws:ro");
 
     let mut args = vec![
-        "run", "--rm", "--network", "host",
-        "-v", &aws_mount,
-        "-e", "AWS_EC2_METADATA_DISABLED=true",
+        "run",
+        "--rm",
+        "--network",
+        "host",
+        "-v",
+        &aws_mount,
+        "-e",
+        "AWS_EC2_METADATA_DISABLED=true",
     ];
 
     // Add the image name
     args.push(image);
 
     // Tool arguments (after the image name)
-    let tool_args_owned = build_tool_args(&dsql_endpoint, &port, &config.dsql.user, &config.dsql.database, region, version, overwrite);
+    let tool_args_owned = build_tool_args(
+        &dsql_endpoint,
+        &port,
+        &config.dsql.user,
+        &config.dsql.database,
+        region,
+        version,
+        overwrite,
+    );
     let tool_args_refs: Vec<&str> = tool_args_owned.iter().map(|s| s.as_str()).collect();
     args.extend_from_slice(&tool_args_refs);
 
@@ -87,14 +99,21 @@ fn build_tool_args(
     overwrite: bool,
 ) -> Vec<String> {
     let mut args = vec![
-        "--endpoint".into(), endpoint.into(),
-        "--port".into(), port.into(),
-        "--user".into(), user.into(),
-        "--database".into(), database.into(),
-        "--region".into(), region.into(),
+        "--endpoint".into(),
+        endpoint.into(),
+        "--port".into(),
+        port.into(),
+        "--user".into(),
+        user.into(),
+        "--database".into(),
+        database.into(),
+        "--region".into(),
+        region.into(),
         "setup-schema".into(),
-        "--schema-name".into(), SCHEMA_NAME.into(),
-        "--version".into(), version.into(),
+        "--schema-name".into(),
+        SCHEMA_NAME.into(),
+        "--version".into(),
+        version.into(),
     ];
     if overwrite {
         args.push("--overwrite".into());
