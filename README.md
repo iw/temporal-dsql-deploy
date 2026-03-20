@@ -66,52 +66,54 @@ Four Temporal services against a DSQL cluster, with Elasticsearch for visibility
 
 ### Prerequisites
 
+- Rust stable toolchain
 - Docker and Docker Compose
-- AWS CLI configured with appropriate permissions (`dsql:DbConnect`, `dsql:DbConnectAdmin`)
-- Python 3.14+ and [uv](https://docs.astral.sh/uv/)
-- [Terraform](https://www.terraform.io/downloads) >= 1.0
+- AWS CLI configured with appropriate permissions (`dsql:DbConnect`, `dsql:DbConnectAdmin`, `dynamodb:*`)
+- [Dagger](https://docs.dagger.io/install/) >= 0.20 (for image builds)
 - [temporal-dsql](https://github.com/iw/temporal) — Custom Temporal fork with DSQL persistence support
 
-### 1. Install the CLI
+### 1. Build and Install the CLI
 
 From the repository root:
 
 ```bash
-uv sync
+cargo install --path crates/cli
 ```
 
-All CLI commands are invoked with `uv run tdeploy` from the repo root:
+The `dsqld-build` companion binary (for Dagger image builds):
 
 ```bash
-uv run tdeploy --help
+cargo install --path crates/build
 ```
 
-### 2. Provision Infrastructure
+### 2. Initialize Configuration
 
 ```bash
-uv run tdeploy infra apply-shared --project temporal-dev
+dsqld config init --name my-project --region us-east-1
 ```
 
-This creates a long-lived DSQL cluster (with `prevent_destroy`). Run once, then forget about it.
+This generates a `config.toml` with your project name and region baked in. Both flags are optional (defaults: `temporal-dev`, `eu-west-1`). See `config.example.toml` for all available options.
 
-### 3. Build the Temporal DSQL Runtime Image
+### 3. Provision Infrastructure
 
 ```bash
-uv run tdeploy build temporal ../temporal-dsql
+dsqld infra apply
 ```
 
-### 4. Configure
+This creates a DSQL cluster with deletion protection and two DynamoDB tables (rate limiter + connection lease) via the AWS SDK. The DSQL endpoint is written back to `config.toml` automatically.
+
+### 4. Build the Temporal DSQL Images
 
 ```bash
-cd profiles/dsql
-cp .env.example .env
-# Edit .env — set TEMPORAL_SQL_HOST from the terraform output
+dsqld build temporal
 ```
+
+Builds `temporal-dsql-server:latest` and `temporal-dsql-tool:latest` via Dagger. Expects the `temporal-dsql` repo at `../temporal-dsql` (override with `--source`).
 
 ### 5. Setup Database Schema
 
 ```bash
-uv run tdeploy schema setup
+dsqld schema setup
 ```
 
 The Elasticsearch visibility index is created automatically by Temporal on startup.
@@ -119,7 +121,7 @@ The Elasticsearch visibility index is created automatically by Temporal on start
 ### 6. Start Services
 
 ```bash
-uv run tdeploy services up -d
+dsqld dev up -d
 ```
 
 ### 7. Verify
@@ -132,13 +134,13 @@ uv run tdeploy services up -d
 ### 8. Cleanup
 
 ```bash
-uv run tdeploy services down              # stop services, keep data
-uv run tdeploy services down --volumes    # stop services, remove volumes
+dsqld dev down              # stop services, keep data
+dsqld dev down -v           # stop services, remove volumes
 ```
 
 ## Connection Reservoir
 
-All profiles enable the DSQL Connection Reservoir by default. DSQL has a cluster-wide connection rate limit of 100 connections/second with a burst capacity of 1,000. Traditional connection pools create connections on-demand, which competes for this budget under load. The reservoir solves this by pre-creating connections in a background goroutine so `driver.Open()` never blocks on rate limiting.
+All configurations enable the DSQL Connection Reservoir by default. DSQL has a cluster-wide connection rate limit of 100 connections/second with a burst capacity of 1,000. Traditional connection pools create connections on-demand, which competes for this budget under load. The reservoir solves this by pre-creating connections in a background goroutine so `driver.Open()` never blocks on rate limiting.
 
 ```
 ┌─────────────┐     ┌─────────────────────────────────────┐
@@ -155,43 +157,39 @@ All profiles enable the DSQL Connection Reservoir by default. DSQL has a cluster
 └─────────────┘                └─────────────────┘
 ```
 
-| Setting | Default | Rationale |
-|---------|---------|-----------|
-| `DSQL_RESERVOIR_ENABLED` | `true` | Pre-create connections off the request path |
-| `DSQL_RESERVOIR_TARGET_READY` | `50` | Matches `TEMPORAL_SQL_MAX_CONNS` |
-| `DSQL_RESERVOIR_BASE_LIFETIME` | `11m` | Well under DSQL's 60-minute connection limit |
-| `DSQL_RESERVOIR_LIFETIME_JITTER` | `2m` | Prevents thundering herd (effective range: 10–12m) |
-| `DSQL_RESERVOIR_GUARD_WINDOW` | `45s` | Won't hand out connections about to expire |
+| Config Field | Default | Rationale |
+|---|---|---|
+| `dsql.reservoir.enabled` | `true` | Pre-create connections off the request path |
+| `dsql.reservoir.target_ready` | `50` | Matches `dsql.max_conns` |
+| `dsql.reservoir.base_lifetime` | `11m` | Well under DSQL's 60-minute connection limit |
+| `dsql.reservoir.lifetime_jitter` | `2m` | Prevents thundering herd (effective range: 10–12m) |
+| `dsql.reservoir.guard_window` | `45s` | Won't hand out connections about to expire |
 
-Distributed rate limiting and connection leasing (DynamoDB-backed) are available for multi-instance deployments but disabled for local dev. See the [ECS deployment](https://github.com/iw/temporal-dsql-deploy-ecs) for production configuration.
+This repo also exercises the full distributed coordination stack (DynamoDB-backed rate limiting and connection leasing), which is enabled by default. See the [ECS deployment](https://github.com/iw/temporal-dsql-deploy-ecs) for production configuration details.
 
 ## Project Structure
 
 ```
 temporal-dsql-deploy/
-├── src/tdeploy/                   # Typer CLI (uv run tdeploy)
-│   ├── main.py                    # App with subcommands
-│   ├── infra.py                   # tdeploy infra apply-shared / status
-│   ├── build.py                   # tdeploy build temporal
-│   ├── schema.py                  # tdeploy schema setup
-│   └── services.py               # tdeploy services up / down / ps / logs
-├── terraform/
-│   └── shared/                    # Long-lived: DSQL cluster + optional DynamoDB
-├── profiles/
-│   └── dsql/                      # DSQL development profile
-│       ├── docker-compose.yml     # Temporal + ES + observability
-│       ├── .env.example           # Environment template
-│       ├── dynamicconfig/         # Temporal dynamic configuration
-│       └── README.md
-├── docker/                        # Shared Docker configuration
-│   └── config/                    # Config templates and provisioning
-├── grafana/                       # Grafana dashboards
-│   ├── server/server.json         # Temporal server health
-│   └── dsql/persistence.json      # DSQL persistence metrics
-├── dsql-tests/                    # Python integration tests
-│   ├── temporal/                  # Temporal feature validation on DSQL
-│   └── plugin/                    # DSQL plugin validation
-└── Dockerfile                     # Temporal DSQL runtime image
+├── .cargo/config.toml          # DSQLD_WORKSPACE_ROOT env
+├── Cargo.toml                  # Workspace root (members = ["crates/*"])
+├── Cargo.lock
+├── config.toml                 # User config (gitignored)
+├── config.example.toml         # Reference config (committed)
+├── crates/
+│   ├── cli/                    # dsqld binary
+│   ├── config/                 # TOML model + validation + env gen
+│   ├── build/                  # dsqld-build binary (Dagger)
+│   └── dagger-client/          # GraphQL client (from EKS repo)
+├── dev/                        # Docker Compose dev environment
+│   ├── docker-compose.yml
+│   ├── config/                 # Alloy, Mimir, Grafana configs
+│   └── dynamicconfig/
+├── docker/                     # Shared Docker assets
+├── grafana/                    # Dashboard JSON
+├── dsql-tests/                 # Python integration tests
+│   └── pyproject.toml          # Independent Python deps
+└── Dockerfile                  # Temporal DSQL runtime image
 ```
 
 ## Observability
@@ -225,86 +223,62 @@ Temporal Services :9090 → Alloy (scraper) → Mimir (storage) → Grafana (das
 
 CloudWatch integration requires AWS credentials (`~/.aws` is mounted into the Grafana container). Set the DSQL cluster ID in the dashboard variable to enable the CloudWatch panels.
 
-### DSQL Plugin Metrics
-
-The DSQL plugin emits these metrics via OpenTelemetry:
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `dsql_reservoir_size` | Gauge | Current connections in reservoir |
-| `dsql_reservoir_target` | Gauge | Configured reservoir target |
-| `dsql_reservoir_checkouts_total` | Counter | Successful checkouts |
-| `dsql_reservoir_empty_total` | Counter | Checkouts when reservoir was empty (should be 0) |
-| `dsql_reservoir_discards_total` | Counter | Connections discarded (by reason: expiry, guard, error) |
-| `dsql_reservoir_refills_total` | Counter | Connections added by refiller |
-| `dsql_refiller_inflight` | Gauge | Current concurrent Open() calls |
-| `dsql_pool_in_use` | Gauge | Connections actively executing queries |
-| `dsql_pool_idle` | Gauge | Idle connections in pool |
-| `dsql_tx_conflict_total` | Counter | OCC serialization conflicts |
-| `dsql_tx_retry_total` | Counter | Transaction retry attempts |
-| `dsql_tx_exhausted_total` | Counter | Retries exhausted (terminal failures) |
-
 ## CLI Reference
 
 ```bash
-# Infrastructure
-uv run tdeploy infra apply-shared -p temporal-dev     # Provision DSQL + optional DynamoDB
-uv run tdeploy infra status                           # Show what's provisioned
+# Configuration
+dsqld config init                    # Generate config.toml with defaults
+dsqld config init --name foo --region us-west-2  # With project name and region
 
-# Build
-uv run tdeploy build temporal ../temporal-dsql        # Build runtime images
+# Infrastructure (AWS SDK)
+dsqld infra apply                    # Provision DSQL cluster + DynamoDB tables
+dsqld infra destroy                  # Destroy provisioned resources
+dsqld infra status                   # Show current resource state
+
+# Build (Dagger)
+dsqld build temporal                 # Build temporal-dsql-server + tool images
+dsqld build temporal --source ../temporal-dsql --arch arm64
 
 # Schema
-uv run tdeploy schema setup                           # Setup DSQL schema
+dsqld schema setup                   # Apply DSQL schema
+dsqld schema setup --version 1.1 --overwrite
 
-# Services
-uv run tdeploy services up -d                         # Start services
-uv run tdeploy services down                          # Stop services
-uv run tdeploy services down -v                       # Stop and remove volumes
-uv run tdeploy services ps                            # Show running services
-uv run tdeploy services logs -f temporal-history      # Follow service logs
+# Docker Compose lifecycle
+dsqld dev up -d                      # Start services (detached)
+dsqld dev down                       # Stop services
+dsqld dev down -v                    # Stop + remove volumes
+dsqld dev ps                         # Show service status
+dsqld dev logs temporal-history -f   # Follow service logs
+dsqld dev restart temporal-frontend  # Restart specific service
 ```
-
-First-time setup: `uv sync`
-
-## Infrastructure
-
-Terraform manages a single long-lived module:
-
-| Module | Lifecycle | Resources | Command |
-|--------|-----------|-----------|---------|
-| `terraform/shared/` | Long-lived | DSQL cluster, DynamoDB tables (optional) | `tdeploy infra apply-shared` |
-
-Shared resources use `prevent_destroy` and `deletion_protection_enabled = true`. They persist across service restarts and schema resets. The DynamoDB tables (for distributed rate limiting and connection leasing) are optional — only needed for multi-instance deployments.
 
 ## Development Workflow
 
 ```bash
 # 1. Make changes to the DSQL plugin in ../temporal-dsql
 # 2. Rebuild the runtime image
-uv run tdeploy build temporal ../temporal-dsql
+dsqld build temporal
 
 # 3. Restart services
-uv run tdeploy services down
-uv run tdeploy services up -d
+dsqld dev down
+dsqld dev up -d
 
 # 4. Run integration tests
-cd dsql-tests
-uv run pytest
+cd dsql-tests && uv run python plugin/hello_activity.py
 ```
 
 ## Troubleshooting
 
-1. **DSQL connection issues** — Check AWS credentials (`aws sts get-caller-identity`), verify cluster status (`aws dsql list-clusters --region eu-west-1`), ensure IAM permissions include `dsql:DbConnect`
-2. **Elasticsearch issues** — `docker compose logs elasticsearch`, verify health at http://localhost:9200/_cluster/health
-3. **Temporal service crash loops** — Check `docker compose logs temporal-history` for schema errors. Run `uv run tdeploy schema setup` if the schema hasn't been initialized.
-4. **Reservoir empty checkouts** — Check `dsql_reservoir_empty_total` in Grafana. If sustained non-zero, increase `DSQL_RESERVOIR_TARGET_READY` or check rate limiter logs.
-5. **Shard ownership churn** — If services are stuck in crash loops due to stale cluster membership, restart all services: `docker compose down && docker compose up -d`
+1. **DSQL connection issues** — Check AWS credentials (`aws sts get-caller-identity`), verify cluster status (`dsqld infra status`), ensure IAM permissions include `dsql:DbConnect`
+2. **Elasticsearch issues** — `dsqld dev logs elasticsearch`, verify health at http://localhost:9200/_cluster/health
+3. **Temporal service crash loops** — Check `dsqld dev logs temporal-history` for schema errors. Run `dsqld schema setup` if the schema hasn't been initialized.
+4. **Reservoir empty checkouts** — Check `dsql_reservoir_empty_total` in Grafana. If sustained non-zero, increase `dsql.reservoir.target_ready` in `config.toml`.
+5. **Shard ownership churn** — If services are stuck in crash loops due to stale cluster membership, restart all services: `dsqld dev down && dsqld dev up -d`
 
 ## Related Projects
 
 - [temporal-dsql](https://github.com/iw/temporal) — Custom Temporal fork with Aurora DSQL persistence plugin
-- [temporal-dsql-deploy-ecs](https://github.com/iw/temporal-dsql-deploy-ecs) — Production ECS deployment with Terraform (benchmarked at 150 WPS)
+- [temporal-dsql-deploy-ecs](https://github.com/iw/temporal-dsql-deploy-ecs) — Production ECS deployment (benchmarked at 150 WPS)
 
 ## License
 

@@ -13,7 +13,6 @@ persistence:
         user: $TEMPORAL_SQL_USER
         maxConns: $TEMPORAL_SQL_MAX_CONNS
         maxIdleConns: $TEMPORAL_SQL_MAX_IDLE_CONNS
-        # Optimized for DSQL's serverless architecture  
         connectionTimeout: $TEMPORAL_SQL_CONNECTION_TIMEOUT
         maxConnLifetime: $TEMPORAL_SQL_MAX_CONN_LIFETIME
         tls:
@@ -24,7 +23,6 @@ persistence:
         url:
           scheme: "$TEMPORAL_ELASTICSEARCH_SCHEME"
           host: "$TEMPORAL_ELASTICSEARCH_HOST:$TEMPORAL_ELASTICSEARCH_PORT"
-        # No AWS request signing for local Elasticsearch
         disableSniff: true
         logLevel: error
         indices:
@@ -33,6 +31,7 @@ persistence:
 global:
   membership:
     maxJoinDuration: 30s
+    broadcastAddress: "$TEMPORAL_BROADCAST_ADDRESS"
   pprof:
     port: 7936
   metrics:
@@ -47,25 +46,26 @@ services:
       grpcPort: 7233
       membershipPort: 6933
       bindOnLocalHost: false
+      bindOnIP: "$BIND_ON_IP"
       httpPort: 8233
-
   matching:
     rpc:
       grpcPort: 7235
       membershipPort: 6935
       bindOnLocalHost: false
-
+      bindOnIP: "$BIND_ON_IP"
   history:
     rpc:
       grpcPort: 7234
       membershipPort: 6934
       bindOnLocalHost: false
-
+      bindOnIP: "$BIND_ON_IP"
   worker:
     rpc:
       grpcPort: 7239
       membershipPort: 6939
       bindOnLocalHost: false
+      bindOnIP: "$BIND_ON_IP"
 
 clusterMetadata:
   enableGlobalNamespace: false

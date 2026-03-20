@@ -23,9 +23,12 @@ All scripts connect to `localhost:7233` by default.
 Override with `--address` or `TEMPORAL_ADDRESS` env var where supported.
 
 ```bash
-# Run from repo root with uv
-uv run python dsql-tests/temporal/chasm_scheduler_test.py
-uv run python dsql-tests/plugin/token_refresh_test.py
+# Install deps (one-time)
+cd dsql-tests && uv sync
+
+# Run from dsql-tests/
+uv run python temporal/chasm_scheduler_test.py
+uv run python plugin/token_refresh_test.py
 ```
 
 ## Categories

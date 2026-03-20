@@ -2,7 +2,7 @@
 
 ## Mission
 
-Local development environment for the [temporal-dsql](https://github.com/iw/temporal) fork, which adds Aurora DSQL as a first-class persistence backend for Temporal. This repo provides the Docker Compose stack to build, run, and observe Temporal against a real DSQL cluster with full observability.
+Local development environment for the [temporal-dsql](https://github.com/iw/temporal) fork, which adds Aurora DSQL as a first-class persistence backend for Temporal. This repo provides the Rust CLI (`dsqld`) and Docker Compose stack to build, run, and observe Temporal against a real DSQL cluster with full observability.
 
 This is **not** a production deployment solution. For production, see `temporal-dsql-deploy-ecs`.
 
@@ -38,114 +38,179 @@ Four Temporal services against a DSQL cluster, with Elasticsearch for visibility
 ## Quick Start
 
 ### Prerequisites
+- Rust stable toolchain
 - Docker & Docker Compose
 - AWS CLI configured with appropriate permissions
-- Python 3.14+ and [uv](https://docs.astral.sh/uv/)
-- [Terraform](https://www.terraform.io/downloads) >= 1.0
-- [temporal-dsql](https://github.com/iw/temporal) repository built and available at `../temporal-dsql`
+- [Dagger](https://docs.dagger.io/install/) >= 0.20 (for image builds)
+- [temporal-dsql](https://github.com/iw/temporal) repository at `../temporal-dsql`
 
 ### Setup
 
 ```bash
-# 1. Install CLI
-uv sync
+# 1. Build the CLI
+cargo install --path crates/cli
 
-# 2. Provision shared DSQL cluster (one-time)
-uv run tdeploy infra apply-shared --project temporal-dev
+# 2. Initialize config
+dsqld config init
 
-# 3. Build Temporal DSQL runtime image
-uv run tdeploy build temporal ../temporal-dsql
+# 3. Provision DSQL cluster and DynamoDB tables
+dsqld infra apply
 
-# 4. Configure environment
-cd profiles/dsql && cp .env.example .env
-# Edit .env — set TEMPORAL_SQL_HOST from terraform output
+# 4. Build Temporal DSQL images via Dagger
+dsqld build temporal
 
 # 5. Setup DSQL schema
-uv run tdeploy schema setup
+dsqld schema setup
 
 # 6. Start services
-uv run tdeploy services up -d
+dsqld dev up -d
 
 # 7. Verify
 open http://localhost:8080    # Temporal UI
 open http://localhost:3000    # Grafana (admin/admin)
 
 # 8. Cleanup
-uv run tdeploy services down
+dsqld dev down
 ```
 
 ## Project Structure
 
 ```
 temporal-dsql-deploy/
-├── src/tdeploy/               # Typer CLI (uv run tdeploy)
-│   ├── main.py                # App with subcommands
-│   ├── infra.py               # infra apply-shared / status
-│   ├── build.py               # build temporal
-│   ├── schema.py              # schema setup
-│   └── services.py            # services up / down / ps / logs
-├── terraform/
-│   └── shared/                # Long-lived: DSQL cluster + optional DynamoDB
-├── profiles/
-│   └── dsql/                  # DSQL development profile
-│       ├── docker-compose.yml
-│       ├── .env.example
-│       ├── dynamicconfig/
-│       └── README.md
-├── docker/                    # Shared Docker configuration
-│   └── config/                # Config templates and provisioning
-├── grafana/                   # Grafana dashboards
-│   ├── server/server.json     # Temporal server health
-│   └── dsql/persistence.json  # DSQL persistence metrics
-├── dsql-tests/                # Python integration tests
-│   ├── temporal/              # Temporal feature validation on DSQL
-│   └── plugin/                # DSQL plugin validation
-├── Dockerfile                 # Temporal DSQL runtime image
-└── pyproject.toml             # Project config (uv)
+├── .cargo/config.toml          # DSQLD_WORKSPACE_ROOT env
+├── Cargo.toml                  # Workspace root (members = ["crates/*"])
+├── Cargo.lock
+├── config.toml                 # User config (gitignored)
+├── config.example.toml         # Reference config (committed)
+├── crates/
+│   ├── cli/                    # dsqld binary
+│   │   └── src/
+│   │       ├── main.rs
+│   │       ├── exec.rs         # Subprocess execution
+│   │       ├── paths.rs        # Workspace-relative paths
+│   │       └── cmd/
+│   │           ├── config.rs   # dsqld config init
+│   │           ├── infra.rs    # dsqld infra apply/destroy/status
+│   │           ├── build.rs    # dsqld build temporal
+│   │           ├── schema.rs   # dsqld schema setup
+│   │           └── dev.rs      # dsqld dev up/down/ps/logs/restart
+│   ├── config/                 # TOML model + validation + env gen
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── model.rs        # ProjectConfig and all config structs
+│   │       ├── validate.rs     # Config validation (pool invariants)
+│   │       └── env.rs          # .env generation from config
+│   ├── build/                  # dsqld-build binary (Dagger)
+│   │   └── src/main.rs
+│   └── dagger-client/          # GraphQL client (from EKS repo)
+│       └── src/lib.rs
+├── dev/                        # Docker Compose dev environment
+│   ├── docker-compose.yml
+│   ├── .env                    # Generated (gitignored)
+│   ├── config/                 # Alloy, Mimir, Grafana configs
+│   └── dynamicconfig/
+├── docker/                     # Shared Docker assets
+│   ├── config/
+│   └── render-and-start.sh
+├── grafana/                    # Dashboard JSON
+├── dsql-tests/                 # Python integration tests
+│   ├── pyproject.toml          # Independent Python deps
+│   ├── temporal/               # Temporal feature validation
+│   └── plugin/                 # DSQL plugin validation
+├── Dockerfile                  # Temporal DSQL runtime image
+├── AGENTS.md
+└── README.md
 ```
+
+## Workspace Architecture
+
+Cargo workspace with four crates:
+
+| Crate | Binary | Purpose | Dependencies |
+|-------|--------|---------|-------------|
+| `cli` | `dsqld` | Main CLI with subcommands | `config`, `clap`, `eyre`, `which`, `aws-sdk-*`, `tokio` |
+| `config` | — | TOML config model, validation, env generation | `serde`, `toml`, `thiserror` |
+| `build` | `dsqld-build` | Dagger-based image builder | `clap`, `eyre`, `dagger-client` |
+| `dagger-client` | — | Lightweight GraphQL client for Dagger | (copied from EKS repo) |
+
+Dependency flow: `cli` → `config`; `build` → `dagger-client`.
 
 ## CLI Reference
 
-All commands run from the repo root with `uv run tdeploy`:
-
 ```bash
-# Infrastructure
-uv run tdeploy infra apply-shared -p temporal-dev
-uv run tdeploy infra status
+# Configuration
+dsqld config init                    # Generate config.toml with defaults
 
-# Build
-uv run tdeploy build temporal ../temporal-dsql
+# Infrastructure (AWS SDK — no Terraform)
+dsqld infra apply                    # Provision DSQL cluster + DynamoDB tables
+dsqld infra destroy                  # Destroy provisioned resources
+dsqld infra status                   # Show current resource state
+
+# Build (Dagger)
+dsqld build temporal                 # Build temporal-dsql-server + tool images
+dsqld build temporal --source ../temporal-dsql --arch arm64
 
 # Schema
-uv run tdeploy schema setup
+dsqld schema setup                   # Apply DSQL schema
+dsqld schema setup --version 1.1 --overwrite
 
-# Services
-uv run tdeploy services up -d
-uv run tdeploy services down
-uv run tdeploy services down -v
-uv run tdeploy services ps
-uv run tdeploy services logs -f temporal-history
+# Docker Compose lifecycle
+dsqld dev up -d                      # Start services (detached)
+dsqld dev down                       # Stop services
+dsqld dev down -v                    # Stop + remove volumes
+dsqld dev ps                         # Show service status
+dsqld dev logs temporal-history -f   # Follow service logs
+dsqld dev restart temporal-frontend  # Restart specific service
 ```
+
+## Design Decisions
+
+### 1. TOML Config as Single Source of Truth
+
+`config.toml` drives all CLI commands. The `.env` file is a derived artifact generated before every `dev` command. Developers edit `config.toml` only — no hand-editing `.env` files.
+
+### 2. Direct AWS SDK (No Terraform)
+
+Infrastructure is managed via `aws-sdk-dsql` and `aws-sdk-dynamodb` directly. `dsqld infra apply` creates the DSQL cluster and DynamoDB tables; `dsqld infra destroy` tears them down. No Terraform state to manage.
+
+### 3. Full Connection Management Stack
+
+Unlike the EKS repo (which disables DynamoDB-backed layers for dev profiles), this repo exercises the full DSQL connection management stack:
+- **Reservoir**: Pre-creates connections so `Open()` never blocks
+- **Distributed rate limiting**: DynamoDB-backed token bucket (100 conn/sec budget)
+- **Connection leasing**: DynamoDB-backed slot blocks (10k connection limit)
+
+All three layers default to enabled. `infra apply` always creates the DynamoDB tables.
+
+### 4. All DSQL Env Vars Flow Through Generated `.env`
+
+The `dev/docker-compose.yml` does not hardcode any DSQL, reservoir, rate limiting, or connection lease environment variables. All configuration flows through the generated `dev/.env` via `env_file:`. The only `environment:` entries in compose are non-DSQL constants.
+
+### 5. Compile-Time Workspace Root
+
+`.cargo/config.toml` injects `DSQLD_WORKSPACE_ROOT` so all paths resolve without runtime discovery.
+
+### 6. Subprocess Over Library Bindings
+
+Docker Compose and `temporal-dsql-tool` are invoked as subprocesses (matching `temporal-loom`), not via Rust library bindings.
 
 ## Connection Reservoir
 
 DSQL has a cluster-wide connection rate limit of 100 connections/second with a burst capacity of 1,000. The reservoir pre-creates connections in a background goroutine so `driver.Open()` never blocks on rate limiting.
 
-| Setting | Default | Rationale |
-|---------|---------|-----------|
-| `DSQL_RESERVOIR_ENABLED` | `true` | Pre-create connections off the request path |
-| `DSQL_RESERVOIR_TARGET_READY` | `50` | Matches `TEMPORAL_SQL_MAX_CONNS` |
-| `DSQL_RESERVOIR_BASE_LIFETIME` | `11m` | Well under DSQL's 60-minute connection limit |
-| `DSQL_RESERVOIR_LIFETIME_JITTER` | `2m` | Prevents thundering herd (effective range: 10–12m) |
-| `DSQL_RESERVOIR_GUARD_WINDOW` | `45s` | Won't hand out connections about to expire |
-
-Distributed rate limiting and connection leasing (DynamoDB-backed) are available for multi-instance deployments but disabled for local dev.
+| Config Field | Default | Rationale |
+|---|---|---|
+| `dsql.reservoir.enabled` | `true` | Pre-create connections off the request path |
+| `dsql.reservoir.target_ready` | `50` | Matches `dsql.max_conns` |
+| `dsql.reservoir.base_lifetime` | `11m` | Well under DSQL's 60-minute connection limit |
+| `dsql.reservoir.lifetime_jitter` | `2m` | Prevents thundering herd (effective range: 10–12m) |
+| `dsql.reservoir.guard_window` | `45s` | Won't hand out connections about to expire |
 
 ## Docker Compose Services
 
 ```yaml
 services:
-  elasticsearch:      # Visibility store
+  elasticsearch:      # Visibility store (ES 8.17.0)
   temporal-history:   # Core workflow engine
   temporal-matching:  # Task queue management
   temporal-frontend:  # API gateway
@@ -156,18 +221,36 @@ services:
   grafana:            # Dashboards
 ```
 
+## Non-Negotiable Rules
+
+### Rust Standards
+
+- Edition 2024, stable toolchain
+- `cargo fmt` + `cargo clippy -- -D warnings` must pass with zero warnings
+- `thiserror` in the config crate, `eyre` + `color-eyre` in CLI and build crates
+- No `.unwrap()` outside tests
+- All public types derive `Debug`
+- No `unsafe` code
+
+### Config Invariant
+
+- `dsql.max_idle_conns` MUST equal `dsql.max_conns` — this is a DSQL survival invariant, not a suggestion. The config crate validates this at load time.
+
 ## Working Agreements
 
-- Mirror existing code style, naming, and error handling patterns
-- All CLI commands go through `uv run tdeploy` — no standalone bash scripts
-- Profiles are self-contained: each has its own `.env`, config, and compose file
-- Shared resources live at the repo root: `docker/config/`, `grafana/`, `src/tdeploy/`
-- Connection pool: `MaxIdleConns` MUST equal `MaxConns` to prevent pool decay
+- All CLI commands go through `dsqld` — no standalone bash scripts
+- `config.toml` is the single source of truth; `.env` is always generated
+- Mirror patterns from `temporal-loom` (exec module, paths module, compose wrapping)
+- Mirror patterns from `temporal-dsql-deploy-eks` (TOML config, Dagger client, AWS SDK)
 
 ## Troubleshooting
 
 1. **DSQL connection issues** — Check `aws sts get-caller-identity`, verify cluster status
-2. **Elasticsearch issues** — `docker compose logs elasticsearch`, check http://localhost:9200/_cluster/health
-3. **Temporal crash loops** — Check logs for schema errors, run `uv run tdeploy schema setup`
-4. **Reservoir empty checkouts** — Check `dsql_reservoir_empty_total` in Grafana, increase target
-5. **Shard ownership churn** — Restart all services: `uv run tdeploy services down && uv run tdeploy services up -d`
+2. **Elasticsearch issues** — `dsqld dev logs elasticsearch`, check http://localhost:9200/_cluster/health
+3. **Temporal crash loops** — Check `dsqld dev logs temporal-history` for schema errors, run `dsqld schema setup`
+4. **Reservoir empty checkouts** — Check `dsql_reservoir_empty_total` in Grafana, increase `dsql.reservoir.target_ready` in `config.toml`
+5. **Shard ownership churn** — Restart all services: `dsqld dev down && dsqld dev up -d`
+
+## Spec Reference
+
+- `.kiro/specs/rust-cli-rewrite/` — Rust CLI rewrite spec (requirements, design, tasks)

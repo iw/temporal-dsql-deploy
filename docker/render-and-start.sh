@@ -1,61 +1,97 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
-TEMPLATE_PATH="${TEMPORAL_PERSISTENCE_TEMPLATE:-/etc/temporal/config/persistence-dsql.template.yaml}"
-OUTPUT_PATH="${TEMPORAL_PERSISTENCE_CONFIG:-/etc/temporal/config/persistence-dsql.yaml}"
-BASE_ENTRYPOINT="${TEMPORAL_BASE_ENTRYPOINT:-/etc/temporal/entrypoint.sh}"
+# render-and-start.sh — Renders persistence YAML template by substituting
+# environment variables, validates the result, then starts temporal-server.
+#
+# All CLI arguments ($@) are passed through to temporal-server, enabling
+# --config-file and --service flags from docker-compose command.
 
-python3 - <<'PY'
-import os
-import re
-from pathlib import Path
+TEMPLATE="${TEMPORAL_PERSISTENCE_TEMPLATE:-/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml}"
+OUTPUT="${TEMPORAL_PERSISTENCE_CONFIG:-/etc/temporal/config/persistence-dsql.yaml}"
+
+# --- Resolve bind and broadcast addresses ---
+# If BIND_ON_IP is not set, resolve from hostname (matches base entrypoint logic)
+: "${BIND_ON_IP:=$(getent hosts "$(hostname)" | awk '{print $1;}')}"
+export BIND_ON_IP
+
+# Broadcast address: the IP other services use to reach this one (ringpop).
+# When binding to wildcard (0.0.0.0), resolve the actual container IP.
+# Otherwise, broadcast the same IP we're binding to.
+if [ "${BIND_ON_IP}" = "0.0.0.0" ] || [ "${BIND_ON_IP}" = "::0" ]; then
+    : "${TEMPORAL_BROADCAST_ADDRESS:=$(getent hosts "$(hostname)" | awk '{print $1;}')}"
+else
+    : "${TEMPORAL_BROADCAST_ADDRESS:=${BIND_ON_IP}}"
+fi
+export TEMPORAL_BROADCAST_ADDRESS
+
+echo "Bind IP: $BIND_ON_IP"
+echo "Broadcast Address: $TEMPORAL_BROADCAST_ADDRESS"
+
+# --- Validate required environment variables ---
+REQUIRED_VARS=(
+    TEMPORAL_SQL_HOST
+    TEMPORAL_SQL_PORT
+    TEMPORAL_SQL_USER
+    TEMPORAL_SQL_DATABASE
+    TEMPORAL_SQL_PLUGIN_NAME
+    TEMPORAL_SQL_MAX_CONNS
+    TEMPORAL_SQL_MAX_IDLE_CONNS
+    TEMPORAL_SQL_TLS_ENABLED
+    TEMPORAL_HISTORY_SHARDS
+    TEMPORAL_ELASTICSEARCH_VERSION
+    TEMPORAL_ELASTICSEARCH_SCHEME
+    TEMPORAL_ELASTICSEARCH_HOST
+    TEMPORAL_ELASTICSEARCH_PORT
+    TEMPORAL_ELASTICSEARCH_INDEX
+)
+
+missing=()
+for var in "${REQUIRED_VARS[@]}"; do
+    if [ -z "${!var:-}" ]; then
+        missing+=("$var")
+    fi
+done
+
+if [ ${#missing[@]} -gt 0 ]; then
+    echo "ERROR: Missing required environment variables:"
+    for var in "${missing[@]}"; do
+        echo "  - $var"
+    done
+    exit 1
+fi
+
+# --- Validate template file exists ---
+if [ ! -f "$TEMPLATE" ]; then
+    echo "ERROR: Persistence template not found: $TEMPLATE"
+    exit 1
+fi
+
+# --- Render template using Python's string.Template ---
+python3 -c "
+import os, sys
 from string import Template
 
-template_path = Path(os.environ.get("TEMPORAL_PERSISTENCE_TEMPLATE", "/etc/temporal/config/persistence-dsql.template.yaml"))
-output_path = Path(os.environ.get("TEMPORAL_PERSISTENCE_CONFIG", "/etc/temporal/config/persistence-dsql.yaml"))
+with open('$TEMPLATE', 'r') as f:
+    tmpl = Template(f.read())
 
-if not template_path.exists():
-    raise SystemExit(f"Missing persistence template: {template_path}")
+result = tmpl.safe_substitute(os.environ)
 
-# Required environment variables for Temporal DSQL + Elasticsearch configuration
-required_vars = [
-    "TEMPORAL_SQL_HOST", "TEMPORAL_SQL_PORT", "TEMPORAL_SQL_DATABASE", 
-    "TEMPORAL_SQL_USER", "TEMPORAL_SQL_PLUGIN_NAME",
-    "TEMPORAL_SQL_TLS_ENABLED", "TEMPORAL_HISTORY_SHARDS",
-    "TEMPORAL_SQL_MAX_CONNS", "TEMPORAL_SQL_MAX_IDLE_CONNS",
-    "TEMPORAL_SQL_CONNECTION_TIMEOUT", "TEMPORAL_SQL_MAX_CONN_LIFETIME",
-    "TEMPORAL_ELASTICSEARCH_HOST", "TEMPORAL_ELASTICSEARCH_PORT", 
-    "TEMPORAL_ELASTICSEARCH_SCHEME", "TEMPORAL_ELASTICSEARCH_VERSION",
-    "TEMPORAL_ELASTICSEARCH_INDEX"
-]
+with open('$OUTPUT', 'w') as f:
+    f.write(result)
+"
 
-# Check for missing required variables
-missing_vars = [var for var in required_vars if not os.environ.get(var)]
-if missing_vars:
-    raise SystemExit(f"Missing required environment variables: {', '.join(missing_vars)}")
+# --- Check for unsubstituted variables ---
+unsubstituted=$(grep -oE '\$\{?[A-Z_][A-Z0-9_]*\}?' "$OUTPUT" 2>/dev/null || true)
+if [ -n "$unsubstituted" ]; then
+    echo "ERROR: Unsubstituted variables found in rendered config:"
+    echo "$unsubstituted" | sort -u | while read -r var; do
+        echo "  - $var"
+    done
+    exit 1
+fi
 
-# Validate authentication method for DSQL
-iam_auth = os.environ.get("TEMPORAL_SQL_IAM_AUTH", "").lower() == "true"
-password_file = os.environ.get("TEMPORAL_SQL_PASSWORD_FILE")
+echo "Persistence config rendered: $OUTPUT"
 
-if not iam_auth and not password_file:
-    raise SystemExit("Either TEMPORAL_SQL_IAM_AUTH=true or TEMPORAL_SQL_PASSWORD_FILE must be set")
-
-# Validate that password files exist (only if not using IAM auth)
-if not iam_auth and password_file and not Path(password_file).exists():
-    raise SystemExit(f"SQL password file not found: {password_file}")
-
-content = Template(template_path.read_text())
-rendered = content.substitute({k: v for k, v in os.environ.items()})
-
-# Verify no unsubstituted variables remain
-unsubstituted = re.findall(r'\$[A-Z_]+', rendered)
-if unsubstituted:
-    raise SystemExit(f"Template contains unsubstituted variables: {', '.join(set(unsubstituted))}")
-
-output_path.parent.mkdir(parents=True, exist_ok=True)
-output_path.write_text(rendered)
-print(f"Successfully rendered {template_path} -> {output_path}")
-PY
-
-exec "${BASE_ENTRYPOINT}" "$@"
+# --- Start temporal-server directly with all CLI args ---
+exec temporal-server "$@"
